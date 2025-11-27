@@ -1,0 +1,268 @@
+#include "USB.h"
+#include "USBHIDKeyboard.h"
+
+USBHIDKeyboard Keyboard;
+
+// Definição dos pinos
+int p19 = 19;
+int p18 = 18;
+int p5  = 5;
+int p17 = 17;
+int p16 = 16;
+int p4  = 4;
+int pEnter = 15;  // Pino do botão Enter
+int pEspaco = 2;  // Pino do botão Espaço
+int pDelete = 14; // Pino do botão Delete/Backspace
+
+// Variáveis de controle do buffer
+bool bufferAtivo = false;
+unsigned long tempoInicio = 0;
+unsigned long tempoUltimaTecla = 0;
+const unsigned long TEMPO_ESPERA = 300;
+const unsigned long DEBOUNCE_DELAY = 50;
+int buffer[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+int leituraAnterior[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+
+// ===== SETUP =====
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Inicializa USB e Keyboard
+  Keyboard.begin();
+  USB.begin();
+  
+  delay(100);
+  
+  pinMode(19, INPUT_PULLUP); 
+  pinMode(18, INPUT_PULLUP); 
+  pinMode(5,  INPUT_PULLUP);
+  pinMode(17, INPUT_PULLUP);
+  pinMode(16, INPUT_PULLUP);
+  pinMode(4,  INPUT_PULLUP);
+  pinMode(pEnter, INPUT_PULLUP);
+  pinMode(pEspaco, INPUT_PULLUP);
+  pinMode(pDelete, INPUT_PULLUP);
+
+  Serial.println("=================================");
+  Serial.println("Teclado Braille USB iniciado!");
+  Serial.println("=================================");
+  Serial.println("Conecte ao computador via USB");
+  Serial.println("Pressione as combinações...\n");
+}
+
+void loop() {
+  // Verifica botão Delete
+  if (digitalRead(pDelete) == LOW) {
+    Keyboard.write(KEY_BACKSPACE); // Envia backspace USB
+    Serial.println("[DELETE enviado]");
+    
+    while (digitalRead(pDelete) == LOW) {
+      delay(10);
+    }
+    delay(DEBOUNCE_DELAY);
+    return;
+  }
+
+  // Verifica botão Enter
+  if (digitalRead(pEnter) == LOW) {
+    Keyboard.write(KEY_RETURN); // Envia Enter USB
+    Serial.println("[ENTER enviado]");
+    
+    while (digitalRead(pEnter) == LOW) {
+      delay(10);
+    }
+    delay(DEBOUNCE_DELAY);
+    return;
+  }
+
+  // Verifica botão Espaço
+  if (digitalRead(pEspaco) == LOW) {
+    Keyboard.write(' '); // Envia espaço USB
+    Serial.println("[ESPAÇO enviado]");
+    
+    while (digitalRead(pEspaco) == LOW) {
+      delay(10);
+    }
+    delay(DEBOUNCE_DELAY);
+    return;
+  }
+
+  // Leitura dos botões Braille
+  int leituraAtual[6] = {
+    digitalRead(5),
+    digitalRead(18),
+    digitalRead(19),
+    digitalRead(17),
+    digitalRead(16),
+    digitalRead(4)
+  };
+
+  bool algumPressionado = false;
+  bool novasTeclasDetectadas = false;
+  
+  for (int i = 0; i < 6; i++) {
+    if (leituraAtual[i] == LOW) {
+      algumPressionado = true;
+      if (leituraAnterior[i] == HIGH && leituraAtual[i] == LOW) {
+        novasTeclasDetectadas = true;
+        tempoUltimaTecla = millis();
+      }
+    }
+  }
+
+  if (algumPressionado && !bufferAtivo) {
+    bufferAtivo = true;
+    tempoInicio = millis();
+    tempoUltimaTecla = millis();
+    limparBuffer();
+    Serial.println("[Capturando teclas...]");
+  }
+
+  if (bufferAtivo) {
+    for (int i = 0; i < 6; i++) {
+      if (leituraAtual[i] == LOW) {
+        buffer[i] = LOW;
+      }
+    }
+
+    if (novasTeclasDetectadas) {
+      tempoInicio = millis();
+    }
+
+    if (millis() - tempoInicio >= TEMPO_ESPERA) {
+      processarBuffer();
+      aguardarSoltarBotoes();
+      bufferAtivo = false;
+      limparBuffer();
+    }
+  }
+
+  for (int i = 0; i < 6; i++) {
+    leituraAnterior[i] = leituraAtual[i];
+  }
+
+  delay(10);
+}
+
+// ===== FUNÇÕES AUXILIARES =====
+
+void limparBuffer() {
+  for (int i = 0; i < 6; i++) {
+    buffer[i] = HIGH;
+  }
+}
+
+void aguardarSoltarBotoes() {
+  while (digitalRead(5) == LOW || digitalRead(18) == LOW || 
+         digitalRead(19) == LOW || digitalRead(17) == LOW || 
+         digitalRead(16) == LOW || digitalRead(4) == LOW) {
+    delay(10);
+  }
+  delay(DEBOUNCE_DELAY);
+}
+
+void processarBuffer() {
+  int b1 = buffer[0];
+  int b2 = buffer[1];
+  int b3 = buffer[2];
+  int b4 = buffer[3];
+  int b5 = buffer[4];
+  int b6 = buffer[5];
+
+  char letra = '\0';
+
+  // 5 botões
+  if (b1 == LOW && b2 == LOW && b3 == LOW && b4 == LOW && b5 == LOW) {
+    letra = 'Q';
+  }
+  else if (b1 == LOW && b3 == LOW && b4 == LOW && b5 == LOW && b6 == LOW) {
+    letra = 'Y';
+  }
+  // 4 botões
+  else if (b1 == LOW && b2 == LOW && b3 == LOW && b4 == LOW) {
+    letra = 'P';
+  }
+  else if (b1 == LOW && b2 == LOW && b3 == LOW && b5 == LOW) {
+    letra = 'R';
+  }
+  else if (b1 == LOW && b2 == LOW && b3 == LOW && b6 == LOW) {
+    letra = 'V';
+  }
+  else if (b1 == LOW && b2 == LOW && b4 == LOW && b5 == LOW) {
+    letra = 'G';
+  }
+  else if (b1 == LOW && b3 == LOW && b4 == LOW && b5 == LOW) {
+    letra = 'N';
+  }
+  else if (b1 == LOW && b3 == LOW && b4 == LOW && b6 == LOW) {
+    letra = 'X';
+  }
+  else if (b1 == LOW && b3 == LOW && b5 == LOW && b6 == LOW) {
+    letra = 'Z';
+  }
+  else if (b2 == LOW && b3 == LOW && b4 == LOW && b5 == LOW) {
+    letra = 'T';
+  }
+  else if (b2 == LOW && b4 == LOW && b5 == LOW && b6 == LOW) {
+    letra = 'W';
+  }
+  // 3 botões
+  else if (b1 == LOW && b2 == LOW && b3 == LOW) {
+    letra = 'L';
+  }
+  else if (b1 == LOW && b2 == LOW && b4 == LOW) {
+    letra = 'F';
+  }
+  else if (b1 == LOW && b2 == LOW && b5 == LOW) {
+    letra = 'H';
+  }
+  else if (b1 == LOW && b3 == LOW && b4 == LOW) {
+    letra = 'M';
+  }
+  else if (b1 == LOW && b3 == LOW && b5 == LOW) {
+    letra = 'O';
+  }
+  else if (b1 == LOW && b3 == LOW && b6 == LOW) {
+    letra = 'U';
+  }
+  else if (b1 == LOW && b4 == LOW && b5 == LOW) {
+    letra = 'D';
+  }
+  else if (b2 == LOW && b3 == LOW && b4 == LOW) {
+    letra = 'S';
+  }
+  else if (b2 == LOW && b4 == LOW && b5 == LOW) {
+    letra = 'J';
+  }
+  // 2 botões
+  else if (b1 == LOW && b2 == LOW) {
+    letra = 'B';
+  }
+  else if (b1 == LOW && b3 == LOW) {
+    letra = 'K';
+  }
+  else if (b1 == LOW && b4 == LOW) {
+    letra = 'C';
+  }
+  else if (b1 == LOW && b5 == LOW) {
+    letra = 'E';
+  }
+  else if (b2 == LOW && b4 == LOW) {
+    letra = 'I';
+  }
+  // 1 botão
+  else if (b1 == LOW) {
+    letra = 'A';
+  }
+  else {
+    letra = '?';
+  }
+
+  // Envia via USB
+  if (letra != '\0') {
+    Keyboard.write(letra); // ENVIA PARA O COMPUTADOR!
+    Serial.print("Enviado: ");
+    Serial.println(letra);
+  }
+}
