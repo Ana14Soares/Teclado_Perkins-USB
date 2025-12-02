@@ -1,0 +1,283 @@
+// Definição dos pinos
+int p19 = 19;
+int p18 = 18;
+int p5  = 5;
+int p17 = 17;
+int p16 = 16;
+int p4  = 4;
+int pEnter = 2; // Pino do botão Enter (ajuste conforme seu hardware)
+int pEspaco = 15;
+// Variáveis de controle do buffer
+bool bufferAtivo = false;
+unsigned long tempoInicio = 0;
+unsigned long tempoUltimaTecla = 0;
+const unsigned long TEMPO_ESPERA = 300; // Reduzido para 300ms
+const unsigned long DEBOUNCE_DELAY = 50;
+int buffer[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+int leituraAnterior[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+  
+  // Configura pull-up nos pinos
+  pinMode(19, INPUT_PULLUP); 
+  pinMode(18, INPUT_PULLUP); 
+  pinMode(5,  INPUT_PULLUP);
+  pinMode(17, INPUT_PULLUP);
+  pinMode(16, INPUT_PULLUP);
+  pinMode(4,  INPUT_PULLUP);
+  pinMode(2, INPUT_PULLUP); // Botão Enter
+  pinMode(15, INPUT_PULLUP);
+
+  Serial.println("=================================");
+  Serial.println("Sistema Braille iniciado!");
+  Serial.println("=================================");
+  Serial.println("Pressione as combinações de teclas...");
+  Serial.println("Use o botão Enter para quebrar linha\n");
+  Serial.print("> "); // Prompt inicial
+}
+
+void loop() {
+  // Verifica botão Enter separadamente
+  if (digitalRead(pEnter) == LOW) {
+    Serial.println(); // Quebra de linha
+    Serial.print("> "); // Novo prompt
+    
+    // Aguarda soltar o botão Enter
+    while (digitalRead(pEnter) == LOW) {
+      delay(10);
+    }
+    delay(DEBOUNCE_DELAY);
+    return; // Retorna para não processar outras teclas
+  }
+
+  if (digitalRead(pEspaco) == LOW) {
+    Serial.print(" "); // Adiciona espaço
+    
+    // Aguarda soltar o botão Espaço
+    while (digitalRead(pEspaco) == LOW) {
+      delay(10);
+    }
+    delay(DEBOUNCE_DELAY);
+    return; // Retorna para não processar outras teclas
+  }
+
+  // Leitura atual dos botões
+  int leituraAtual[6] = {
+    digitalRead(5),   // b1
+    digitalRead(18),  // b2
+    digitalRead(19),  // b3
+    digitalRead(17),  // b4
+    digitalRead(16),  // b5
+    digitalRead(4)    // b6
+  };
+
+  // Verifica se algum botão foi pressionado
+  bool algumPressionado = false;
+  bool novasTeclasDetectadas = false;
+  
+  for (int i = 0; i < 6; i++) {
+    if (leituraAtual[i] == LOW) {
+      algumPressionado = true;
+      
+      // Detecta nova tecla pressionada
+      if (leituraAnterior[i] == HIGH && leituraAtual[i] == LOW) {
+        novasTeclasDetectadas = true;
+        tempoUltimaTecla = millis();
+      }
+    }
+  }
+
+  // Inicia o buffer quando a primeira tecla for pressionada
+  if (algumPressionado && !bufferAtivo) {
+    bufferAtivo = true;
+    tempoInicio = millis();
+    tempoUltimaTecla = millis();
+    limparBuffer();
+    // Serial.println("[ Buffer ativado - capturando teclas... ]"); // Comentado para não quebrar linha
+  }
+
+  // Armazena estados no buffer
+  if (bufferAtivo) {
+    for (int i = 0; i < 6; i++) {
+      if (leituraAtual[i] == LOW) {
+        buffer[i] = LOW;
+      }
+    }
+
+    // DEBUG: Mostra estado atual do buffer em tempo real
+    if (novasTeclasDetectadas) {
+      // Serial.print("  Nova tecla detectada! Buffer atual: ");
+      // for (int i = 0; i < 6; i++) {
+      //   Serial.print(buffer[i] == LOW ? "1" : "0");
+      // }
+      // Serial.print(" | Tempo restante: ");
+      // Serial.print(TEMPO_ESPERA - (millis() - tempoInicio));
+      // Serial.println("ms");
+    }
+
+    // Atualiza tempo se novas teclas foram detectadas
+    if (novasTeclasDetectadas) {
+      tempoInicio = millis();
+    }
+
+    // Verifica se o tempo de espera terminou
+    if (millis() - tempoInicio >= TEMPO_ESPERA) {
+      // Mostra o buffer capturado (comentado para modo produção)
+      // Serial.print("Buffer capturado: ");
+      // for (int i = 0; i < 6; i++) {
+      //   Serial.print(buffer[i] == LOW ? "1" : "0");
+      // }
+      // Serial.println();
+      
+      // Processa o buffer
+      processarBuffer();
+      
+      // Aguarda soltar todos os botões
+      aguardarSoltarBotoes();
+      
+      // Reseta o buffer
+      bufferAtivo = false;
+      limparBuffer();
+      // Serial.println("---\n"); // Comentado para não quebrar linha
+    }
+  }
+
+  // Atualiza leitura anterior
+  for (int i = 0; i < 6; i++) {
+    leituraAnterior[i] = leituraAtual[i];
+  }
+
+  delay(10);
+}
+
+// Função para limpar o buffer
+void limparBuffer() {
+  for (int i = 0; i < 6; i++) {
+    buffer[i] = HIGH;
+  }
+}
+
+// Função para aguardar soltar todos os botões
+void aguardarSoltarBotoes() {
+  while (digitalRead(5) == LOW || digitalRead(18) == LOW || 
+         digitalRead(19) == LOW || digitalRead(17) == LOW || 
+         digitalRead(16) == LOW || digitalRead(4) == LOW) {
+    delay(10);
+  }
+  delay(DEBOUNCE_DELAY);
+}
+
+// Função para processar o buffer e identificar a letra
+void processarBuffer() {
+  int b1 = buffer[0];
+  int b2 = buffer[1];
+  int b3 = buffer[2];
+  int b4 = buffer[3];
+  int b5 = buffer[4];
+  int b6 = buffer[5];
+
+  // Conta quantos botões foram pressionados (comentado para produção)
+  // int totalPressionados = 0;
+  // if (b1 == LOW) totalPressionados++;
+  // if (b2 == LOW) totalPressionados++;
+  // if (b3 == LOW) totalPressionados++;
+  // if (b4 == LOW) totalPressionados++;
+  // if (b5 == LOW) totalPressionados++;
+  // if (b6 == LOW) totalPressionados++;
+  // Serial.print("Total de botões pressionados: ");
+  // Serial.println(totalPressionados);
+
+  // 5 botões (Q e Y) - VERIFICAR PRIMEIRO!
+  if (b1 == LOW && b2 == LOW && b3 == LOW && b4 == LOW && b5 == LOW) {
+    Serial.print("Q");
+  }
+  else if (b1 == LOW && b3 == LOW && b4 == LOW && b5 == LOW && b6 == LOW) {
+    Serial.print("Y");
+  }
+
+  // 4 botões
+  else if (b1 == LOW && b2 == LOW && b3 == LOW && b4 == LOW) {
+    Serial.print("P");
+  }
+  else if (b1 == LOW && b2 == LOW && b3 == LOW && b5 == LOW) {
+    Serial.print("R");
+  }
+  else if (b1 == LOW && b2 == LOW && b3 == LOW && b6 == LOW) {
+    Serial.print("V");
+  }
+  else if (b1 == LOW && b2 == LOW && b4 == LOW && b5 == LOW) {
+    Serial.print("G");
+  }
+  else if (b1 == LOW && b3 == LOW && b4 == LOW && b5 == LOW) {
+    Serial.print("N");
+  }
+  else if (b1 == LOW && b3 == LOW && b4 == LOW && b6 == LOW) {
+    Serial.print("X");
+  }
+  else if (b1 == LOW && b3 == LOW && b5 == LOW && b6 == LOW) {
+    Serial.print("Z");
+  }
+  else if (b2 == LOW && b3 == LOW && b4 == LOW && b5 == LOW) {
+    Serial.print("T");
+  }
+  else if (b2 == LOW && b4 == LOW && b5 == LOW && b6 == LOW) {
+    Serial.print("W");
+  }
+
+  // 3 botões
+  else if (b1 == LOW && b2 == LOW && b3 == LOW) {
+    Serial.print("L");
+  }
+  else if (b1 == LOW && b2 == LOW && b4 == LOW) {
+    Serial.print("F");
+  }
+  else if (b1 == LOW && b2 == LOW && b5 == LOW) {
+    Serial.print("H");
+  }
+  else if (b1 == LOW && b3 == LOW && b4 == LOW) {
+    Serial.print("M");
+  }
+  else if (b1 == LOW && b3 == LOW && b5 == LOW) {
+    Serial.print("O");
+  }
+  else if (b1 == LOW && b3 == LOW && b6 == LOW) {
+    Serial.print("U");
+  }
+  else if (b1 == LOW && b4 == LOW && b5 == LOW) {
+    Serial.print("D");
+  }
+  else if (b2 == LOW && b3 == LOW && b4 == LOW) {
+    Serial.print("S");
+  }
+  else if (b2 == LOW && b4 == LOW && b5 == LOW) {
+    Serial.print("J");
+  }
+
+  // 2 botões
+  else if (b1 == LOW && b2 == LOW) {
+    Serial.print("B");
+  }
+  else if (b1 == LOW && b3 == LOW) {
+    Serial.print("K");
+  }
+  else if (b1 == LOW && b4 == LOW) {
+    Serial.print("C");
+  }
+  else if (b1 == LOW && b5 == LOW) {
+    Serial.print("E");
+  }
+  else if (b2 == LOW && b4 == LOW) {
+    Serial.print("I");
+  }
+
+  // 1 botão
+  else if (b1 == LOW) {
+    Serial.print("A");
+  }
+  
+  else {
+    Serial.print("?"); // Combinação não reconhecida
+  }
+}
