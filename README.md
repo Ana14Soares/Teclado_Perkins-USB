@@ -1,1 +1,3 @@
-# Teclado-Perkins-USB
+# Teclado Perkins USB
+
+O Teclado Perkins via USB é um periférico voltado para entrada de texto em Braille, baseado no layout de seis teclas do padrão Perkins. A comunicação ocorre via USB HID, permitindo reconhecimento nativo pelo sistema operacional sem a necessidade de drivers adicionais. O firmware interpreta combinações simultâneas das teclas (pontos 1 a 6), mapeando-as para seus respectivos caracteres, além de suportar funções complementares como espaço, backspace e enter. Essa solução garante precisão, responsividade e acessibilidade para usuários que dependem da leitura e escrita em Braille.
