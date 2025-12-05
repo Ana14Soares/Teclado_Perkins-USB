@@ -18,7 +18,10 @@ O Teclado Perkins via USB é um periférico voltado para entrada de texto em Bra
 - **ESP32** – microcontrolador responsável pelo processamento e controle das entradas do teclado Perkins e reprodução de áudio via chip MP3.
 
 **Software e Desenvolvimento:**  
-- **Visual Studio Code (VSCode)** – editor de código utilizado para desenvolvimento e programação do ESP32, com extensões para Arduino/ESP32.
+
+- Arduino IDE – Ambiente principal utilizado para desenvolvimento, programação e upload de código para o ESP32, com suporte nativo às bibliotecas e placas da plataforma Arduino/ESP32.
+
+- (Opcional) Visual Studio Code (VSCode) – Pode ser utilizado como editor alternativo para quem preferir, com extensões específicas para Arduino/ESP32.
 
 **Simulação e Testes:**  
 - **Wokwi** – plataforma de simulação online para testar circuitos e código do ESP32 antes da implementação física.
