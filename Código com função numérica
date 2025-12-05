@@ -1,0 +1,335 @@
+#include "USB.h"
+#include "USBHIDKeyboard.h"
+
+// Inicializa o objeto teclado
+USBHIDKeyboard Keyboard;
+
+// Definição dos pinos Braille (Pontos 1 a 6)
+const int pino_b1 = 16; // Ponto 1
+const int pino_b2 = 17; // Ponto 2
+const int pino_b3 = 18; // Ponto 3
+const int pino_b4 = 15; // Ponto 4
+const int pino_b5 = 7;  // Ponto 5
+const int pino_b6 = 6;  // Ponto 6
+
+// Definição dos pinos das Teclas de Função
+const int pEnter      = 41; // Pino do botão Enter
+const int pEspaco     = 42; // Pino do botão Espaço (além do ponto Braille)
+const int pDelete     = 2;  // Pino do botão Delete/Backspace
+const int pino_numero = 8;  // Botão para ativar/desativar modo número
+
+// Array para facilitar o acesso aos pinos Braille
+const int PINOS_BRAILLE[6] = {pino_b1, pino_b2, pino_b3, pino_b4, pino_b5, pino_b6};
+
+// Variáveis de controle de estado
+bool bufferAtivo = false;
+unsigned long tempoInicio = 0;
+const unsigned long TEMPO_ESPERA        = 300; // Tempo em ms para considerar a combinação finalizada
+const unsigned long DEBOUNCE_DELAY      = 50;
+const unsigned long TEMPO_ESPERA_NUMERO = 500; // Tempo maior para números
+
+int buffer[6]          = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+int leituraAnterior[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+
+// Controle de modo numérico
+bool modoNumero = false;
+
+// Protótipos
+void limparBuffer();
+void aguardarSoltarBotoes();
+void processarBuffer();
+void ativarModoNumero();
+void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
+
+// ===== SETUP =====
+void setup() {
+  Keyboard.begin();
+  USB.begin();
+  delay(100);
+
+  // Pinos Braille com pull-up interno
+  for (int i = 0; i < 6; i++) {
+    pinMode(PINOS_BRAILLE[i], INPUT_PULLUP);
+  }
+
+  // Funções + botão numérico
+  pinMode(pEnter,      INPUT_PULLUP);
+  pinMode(pEspaco,     INPUT_PULLUP);
+  pinMode(pDelete,     INPUT_PULLUP);
+  pinMode(pino_numero, INPUT_PULLUP);
+}
+
+// ===== LOOP =====
+void loop() {
+  // 1. Botões de função – prioridade máxima
+  if (digitalRead(pDelete) == LOW) {
+    Keyboard.write(KEY_BACKSPACE);
+    while (digitalRead(pDelete) == LOW) { delay(10); }
+    delay(DEBOUNCE_DELAY);
+    return;
+  }
+
+  if (digitalRead(pEnter) == LOW) {
+    Keyboard.write(KEY_RETURN);
+    while (digitalRead(pEnter) == LOW) { delay(10); }
+    delay(DEBOUNCE_DELAY);
+    return;
+  }
+
+  if (digitalRead(pEspaco) == LOW) {
+    Keyboard.write(' ');
+    while (digitalRead(pEspaco) == LOW) { delay(10); }
+    delay(DEBOUNCE_DELAY);
+    return;
+  }
+
+  // 2. Leitura dos botões Braille
+  int leituraAtual[6];
+  bool algumPressionado      = false;
+  bool novasTeclasDetectadas = false;
+
+  for (int i = 0; i < 6; i++) {
+    leituraAtual[i] = digitalRead(PINOS_BRAILLE[i]);
+    if (leituraAtual[i] == LOW) {
+      algumPressionado = true;
+    }
+  }
+
+  // ==== NOVO: detecção da combinação 001111 (b3,b4,b5,b6) ====
+  bool combinacaoNumeroPressionada =
+    (leituraAtual[0] == HIGH &&  // b1 solto
+     leituraAtual[1] == HIGH &&  // b2 solto
+     leituraAtual[2] == LOW  &&  // b3 pressionado
+     leituraAtual[3] == LOW  &&  // b4 pressionado
+     leituraAtual[4] == LOW  &&  // b5 pressionado
+     leituraAtual[5] == LOW);    // b6 pressionado
+
+  // ATIVAÇÃO DO MODO NÚMERO:
+  // - Se o botão no pino 8 estiver pressionado, OU
+  // - Se a combinação 001111 (b3–b6) estiver pressionada
+  //
+  // (Removido o "!bufferAtivo" para não bloquear o prefixo numérico)
+  if (digitalRead(pino_numero) == LOW || combinacaoNumeroPressionada) {
+    ativarModoNumero();
+
+    // Se veio do botão físico
+    if (digitalRead(pino_numero) == LOW) {
+      while (digitalRead(pino_numero) == LOW) { delay(10); }
+    }
+
+    // Se veio do prefixo Braille, espera soltar os pontos
+    if (combinacaoNumeroPressionada) {
+      aguardarSoltarBotoes();
+    }
+
+    delay(DEBOUNCE_DELAY);
+    return;  // Sai do loop; na próxima rodada, modoNumero já estará atualizado
+  }
+  // ==== FIM DO BLOCO NOVO ====
+
+  // 3. Detecção de novas teclas (para controle de tempo)
+  for (int i = 0; i < 6; i++) {
+    if (leituraAtual[i] == LOW && leituraAnterior[i] == HIGH) {
+      novasTeclasDetectadas = true;
+    }
+  }
+
+  // 4. Gerenciamento do buffer
+  if (algumPressionado && !bufferAtivo) {
+    bufferAtivo  = true;
+    tempoInicio  = millis();
+    limparBuffer();
+  }
+
+  if (bufferAtivo) {
+    // Guarda no buffer quais pontos foram pressionados
+    for (int i = 0; i < 6; i++) {
+      if (leituraAtual[i] == LOW) {
+        buffer[i] = LOW;
+      }
+    }
+
+    // Se uma nova tecla entrou na combinação, reinicia o timer
+    if (novasTeclasDetectadas) {
+      tempoInicio = millis();
+    }
+
+    // Escolhe tempo de espera de acordo com o modo
+    unsigned long tempoLimite = modoNumero ? TEMPO_ESPERA_NUMERO : TEMPO_ESPERA;
+
+    // Quando o tempo expira, processa a combinação
+    if (millis() - tempoInicio >= tempoLimite) {
+      processarBuffer();
+      aguardarSoltarBotoes();
+      bufferAtivo = false;
+      limparBuffer();
+
+      // Aqui está o "modo número só vale para 1 combinação"
+      if (modoNumero) {
+        modoNumero = false;
+      }
+    }
+  }
+
+  // 5. Atualiza estados anteriores
+  for (int i = 0; i < 6; i++) {
+    leituraAnterior[i] = leituraAtual[i];
+  }
+
+  delay(10);
+}
+
+// ===== FUNÇÕES AUXILIARES =====
+
+void ativarModoNumero() {
+  modoNumero   = !modoNumero;  // alterna: liga/desliga
+  bufferAtivo  = false;
+  limparBuffer();
+}
+
+void limparBuffer() {
+  for (int i = 0; i < 6; i++) {
+    buffer[i] = HIGH;
+  }
+}
+
+void aguardarSoltarBotoes() {
+  for (int i = 0; i < 6; i++) {
+    while (digitalRead(PINOS_BRAILLE[i]) == LOW) {
+      delay(10);
+      i = -1; // Reinicia o laço para conferir todos de novo
+    }
+  }
+  delay(DEBOUNCE_DELAY);
+}
+
+// ===== PROCESSAMENTO PRINCIPAL =====
+void processarBuffer() {
+  bool b1 = (buffer[0] == LOW);
+  bool b2 = (buffer[1] == LOW);
+  bool b3 = (buffer[2] == LOW);
+  bool b4 = (buffer[3] == LOW);
+  bool b5 = (buffer[4] == LOW);
+  bool b6 = (buffer[5] == LOW);
+
+  // 1) Se estamos no modo número, delega para a função de dígitos
+  if (modoNumero) {
+    processarBufferNumero(b1, b2, b3, b4, b5, b6);
+    return;
+  }
+
+  // 2) Modo normal – letras e sinais
+  char letra = '\0';
+
+  // A = 100000
+  if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra = 'a'; }
+  // B = 110000
+  else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = 'b'; }
+  // C = 100100
+  else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { letra = 'c'; }
+  // D = 100110
+  else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { letra = 'd'; }
+  // E = 100010
+  else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { letra = 'e'; }
+  // F = 110100
+  else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'f'; }
+  // G = 110110
+  else if (b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'g'; }
+  // H = 110010
+  else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { letra = 'h'; }
+  // I = 010100
+  else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'i'; }
+  // J = 010110
+  else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'j'; }
+  // K = 101000
+  else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { letra = 'k'; }
+  // L = 111000
+  else if (b1 && b2 && b3 && !b4 && !b5 && !b6) { letra = 'l'; }
+  // M = 101100
+  else if (b1 && !b2 && b3 && b4 && !b5 && !b6) { letra = 'm'; }
+  // N = 101110
+  else if (b1 && !b2 && b3 && b4 && b5 && !b6) { letra = 'n'; }
+  // O = 101010
+  else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra = 'o'; }
+  // P = 111100
+  else if (b1 && b2 && b3 && b4 && !b5 && !b6) { letra = 'p'; }
+  // Q = 111110
+  else if (b1 && b2 && b3 && b4 && b5 && !b6) { letra = 'q'; }
+  // R = 111010
+  else if (b1 && b2 && b3 && !b4 && b5 && !b6) { letra = 'r'; }
+  // S = 011100
+  else if (!b1 && b2 && b3 && b4 && !b5 && !b6) { letra = 's'; }
+  // T = 011110
+  else if (!b1 && b2 && b3 && b4 && b5 && !b6) { letra = 't'; }
+  // U = 101001
+  else if (b1 && !b2 && b3 && !b4 && !b5 && b6) { letra = 'u'; }
+  // V = 111001
+  else if (b1 && b2 && b3 && !b4 && !b5 && b6) { letra = 'v'; }
+  // W = 010111
+  else if (!b1 && b2 && !b3 && b4 && b5 && b6) { letra = 'w'; }
+  // X = 101101
+  else if (b1 && !b2 && b3 && b4 && !b5 && b6) { letra = 'x'; }
+  // Y = 101111
+  else if (b1 && !b2 && b3 && b4 && b5 && b6) { letra = 'y'; }
+  // Z = 101011
+  else if (b1 && !b2 && b3 && !b4 && b5 && b6) { letra = 'z'; }
+  // . = 010011
+  else if (!b1 && b2 && !b3 && !b4 && b5 && b6) { letra = '.'; }
+  // , = 010000
+  else if (!b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = ','; }
+  // ! = 011010
+  else if (!b1 && b2 && b3 && !b4 && b5 && !b6) { letra = '!'; }
+  // - = 001001
+  else if (!b1 && !b2 && b3 && !b4 && !b5 && b6) { letra = '-'; }
+  // ESPAÇO = 000000
+  else if (!b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra = ' '; }
+  // > = 101010 (já mapeado como 'o', cuidado aqui – só mantenho porque estava no teu código)
+  else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra = '>'; }
+  // < = 010101
+  else if (!b1 && b2 && !b3 && b4 && !b5 && b6) { letra = '<'; }
+  // + = 011010 (mesma de '!')
+  else if (!b1 && b2 && b3 && !b4 && b5 && !b6) { letra = '+'; }
+  // Desconhecido
+  else {
+    letra = '?';
+  }
+
+  if (letra != '\0') {
+    Keyboard.write(letra);
+  }
+}
+
+// ===== PROCESSAMENTO DE NÚMEROS =====
+void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
+  char digito = '\0';
+
+  // 1 (A) = 100000
+  if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { digito = '1'; }
+  // 2 (B) = 110000
+  else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { digito = '2'; }
+  // 3 (C) = 100100
+  else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { digito = '3'; }
+  // 4 (D) = 100110
+  else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { digito = '4'; }
+  // 5 (E) = 100010
+  else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { digito = '5'; }
+  // 6 (F) = 110100
+  else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { digito = '6'; }
+  // 7 (G) = 110110
+  else if (b1 && b2 && !b3 && b4 && b5 && !b6) { digito = '7'; }
+  // 8 (H) = 110010
+  else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { digito = '8'; }
+  // 9 (I) = 010100
+  else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { digito = '9'; }
+  // 0 (J) = 010110
+  else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { digito = '0'; }
+  // ponto decimal = 010011 (igual ao '.')
+  else if (!b1 && b2 && !b3 && !b4 && b5 && b6) { digito = '.'; }
+  else {
+    digito = '?';
+  }
+
+  if (digito != '\0') {
+    Keyboard.write(digito);
+  }
+}
