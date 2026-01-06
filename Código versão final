@@ -1,0 +1,548 @@
+#include "USB.h"
+#include "USBHIDKeyboard.h"
+
+// Inicializa o objeto teclado
+USBHIDKeyboard Keyboard;
+
+// Definição dos pinos Braille (Pontos 1 a 6)
+const int pino_b1 = 16; // Ponto 1
+const int pino_b2 = 17; // Ponto 2
+const int pino_b3 = 18; // Ponto 3
+const int pino_b4 = 15; // Ponto 4
+const int pino_b5 = 7;  // Ponto 5
+const int pino_b6 = 6;  // Ponto 6
+
+// Definição dos pinos das Teclas de Função
+const int pEnter      = 41; // Pino do botão Enter
+const int pEspaco     = 42; // Pino do botão Espaço (além do ponto Braille)
+const int pDelete     = 2;  // Pino do botão Delete/Backspace
+const int pino_numero = 8;  // Mantido pino 8 para o modo numérico (se for usado)
+
+// NOVO PINO PARA O SHIFT FIXO/PEGAJOSO
+const int pino_shift_latch = 5; 
+
+// Array para facilitar o acesso aos pinos Braille
+const int PINOS_BRAILLE[6] = {pino_b1, pino_b2, pino_b3, pino_b4, pino_b5, pino_b6};
+
+// Variáveis de controle de estado
+bool bufferAtivo = false;
+unsigned long tempoInicio = 0;
+const unsigned long TEMPO_ESPERA         = 300; 
+const unsigned long DEBOUNCE_DELAY       = 50;
+const unsigned long TEMPO_ESPERA_NUMERO  = 500;
+const unsigned long TEMPO_ESPERA_MAIUSCULO = 600;
+
+int buffer[6]          = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+int leituraAnterior[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+
+// Controle de modo
+bool modoNumero = false;
+bool modoMaiusculo = false;
+bool preModoMaiusculo = false;
+bool modoMaiusculoFixo = false;
+// NOVO: Modo Shift (ativado por clique, desativado após 1 caractere)
+bool modoShift = false; 
+
+// Protótipos
+void limparBuffer();
+void aguardarSoltarBotoes();
+void processarBuffer();
+void ativarModoNumero();
+void ativarModoMaiusculo();
+void ativarModoShift(); // NOVO PROTÓTIPO
+void processarBufferMaiusculo(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
+void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
+void processarBufferShift(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
+// Funções que usam o pino 8 precisam ser renomeadas no código se você quiser usá-lo para outra coisa.
+// Mantendo pino_numero = 8 para compatibilidade com o modo numérico Braille.
+
+// ===== SETUP =====
+void setup() {
+    Keyboard.begin();
+    USB.begin();
+    delay(100);
+
+    // Pinos Braille com pull-up interno
+    for (int i = 0; i < 6; i++) {
+        pinMode(PINOS_BRAILLE[i], INPUT_PULLUP);
+    }
+
+    // Funções + botões de Modo
+    pinMode(pEnter,         INPUT_PULLUP);
+    pinMode(pEspaco,        INPUT_PULLUP);
+    pinMode(pDelete,        INPUT_PULLUP);
+    pinMode(pino_numero,    INPUT_PULLUP);
+    pinMode(pino_shift_latch, INPUT_PULLUP); // NOVO PINO
+}
+
+// ===== LOOP =====
+void loop() {
+    // 1. Botões de função – prioridade máxima
+    if (digitalRead(pDelete) == LOW) {
+        Keyboard.write(KEY_BACKSPACE);
+        while (digitalRead(pDelete) == LOW) { delay(10); }
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
+
+    if (digitalRead(pEnter) == LOW) {
+        Keyboard.write(KEY_RETURN);
+        while (digitalRead(pEnter) == LOW) { delay(10); }
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
+
+    // Lógica de desativação do Caps Lock pelo Espaço
+    if (digitalRead(pEspaco) == LOW) {
+        if (modoMaiusculoFixo) {
+            modoMaiusculoFixo = false; // Desliga Caps Lock
+        } else {
+            Keyboard.write(' ');
+        }
+        while (digitalRead(pEspaco) == LOW) { delay(10); }
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
+
+    // 🌟 ATIVAÇÃO DO MODO SHIFT PELO PINO DEDICADO
+    if (digitalRead(pino_shift_latch) == LOW) {
+        ativarModoShift();
+        // Espera soltar o botão Shift
+        while (digitalRead(pino_shift_latch) == LOW) { delay(10); } 
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
+    
+    // 2. Leitura dos botões Braille
+    int leituraAtual[6];
+    bool algumPressionado      = false;
+    bool novasTeclasDetectadas = false;
+    
+    for (int i = 0; i < 6; i++) {
+        leituraAtual[i] = digitalRead(PINOS_BRAILLE[i]);
+        if (leituraAtual[i] == LOW) {
+            algumPressionado = true;
+        }
+    }
+
+    // Combinações de ativação de modo (Prefixos Braille)
+    
+    // Combinação MODO NÚMERO: 001111 (b3,b4,b5,b6)
+    bool combinacaoNumeroPressionada =
+        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&  
+         leituraAtual[2] == LOW  && leituraAtual[3] == LOW  &&  
+         leituraAtual[4] == LOW  && leituraAtual[5] == LOW);    
+
+    // Combinação MODO MAIÚSCULO: 000101 (b4,b6)
+    bool combinacaoMaiusculoPressionada =
+        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&  
+         leituraAtual[2] == HIGH && leituraAtual[3] == LOW  &&  
+         leituraAtual[4] == HIGH && leituraAtual[5] == LOW);    
+
+    // ATIVAÇÃO DO MODO NÚMERO (botão físico ou prefixo Braille)
+    if (digitalRead(pino_numero) == LOW || combinacaoNumeroPressionada) {
+        ativarModoNumero();
+        if (digitalRead(pino_numero) == LOW) {
+            while (digitalRead(pino_numero) == LOW) { delay(10); }
+        }
+        if (combinacaoNumeroPressionada) {
+            aguardarSoltarBotoes();
+        }
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
+
+    // ATIVAÇÃO DO MODO MAIÚSCULO (Caps Lock)
+    if (combinacaoMaiusculoPressionada) {
+        ativarModoMaiusculo();
+        aguardarSoltarBotoes();
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
+
+    // 3. Detecção de novas teclas (para controle de tempo)
+    for (int i = 0; i < 6; i++) {
+        if (leituraAtual[i] == LOW && leituraAnterior[i] == HIGH) {
+            novasTeclasDetectadas = true;
+        }
+    }
+
+    // 4. Gerenciamento do buffer
+    if (algumPressionado && !bufferAtivo) {
+        bufferAtivo   = true;
+        tempoInicio   = millis();
+        limparBuffer();
+    }
+
+    if (bufferAtivo) {
+        // Guarda no buffer quais pontos foram pressionados
+        for (int i = 0; i < 6; i++) {
+            if (leituraAtual[i] == LOW) {
+                buffer[i] = LOW;
+            }
+        }
+
+        if (novasTeclasDetectadas) {
+            tempoInicio = millis();
+        }
+
+        // Escolhe tempo de espera de acordo com o modo
+        unsigned long tempoLimite;
+        if (modoNumero) {
+            tempoLimite = TEMPO_ESPERA_NUMERO;
+        } else if (modoMaiusculo || preModoMaiusculo || modoMaiusculoFixo || modoShift) {
+            // Usa o tempo maior se estiver em qualquer modo especial
+            tempoLimite = TEMPO_ESPERA_MAIUSCULO;
+        } else {
+            tempoLimite = TEMPO_ESPERA;
+        }
+
+        // Quando o tempo expira, processa a combinação
+        if (millis() - tempoInicio >= tempoLimite) {
+            processarBuffer();
+            aguardarSoltarBotoes();
+            bufferAtivo = false;
+            limparBuffer();
+
+            // Lógica de desativação de modos de 1 toque (Sticky Mode)
+            if (modoNumero) {
+                modoNumero = false;
+            }
+
+            if (modoMaiusculo && !modoMaiusculoFixo) {
+                modoMaiusculo = false;
+            }
+
+            if (preModoMaiusculo) {
+                preModoMaiusculo = false;
+            }
+            
+            // 🌟 DESATIVA O MODO SHIFT APÓS UMA COMBINAÇÃO SER PROCESSADA
+            if (modoShift) {
+                modoShift = false;
+            }
+        }
+    }
+
+    // 5. Atualiza estados anteriores
+    for (int i = 0; i < 6; i++) {
+        leituraAnterior[i] = leituraAtual[i];
+    }
+
+    delay(10);
+}
+
+// ===== FUNÇÕES AUXILIARES DE ATIVAÇÃO =====
+
+// 🌟 NOVO: Ativa o modo Shift Fixo/Pegajoso (Sticky)
+void ativarModoShift() {
+    modoShift = !modoShift; // Alterna (liga/desliga)
+    bufferAtivo = false;
+    limparBuffer();
+}
+
+void ativarModoNumero() {
+    modoNumero   = !modoNumero;
+    bufferAtivo  = false;
+    limparBuffer();
+}
+
+void ativarModoMaiusculo() {
+    if (preModoMaiusculo) {
+        modoMaiusculoFixo = true; 
+        preModoMaiusculo = false;
+    } else if (modoMaiusculoFixo) {
+        modoMaiusculoFixo = false;
+    } else {
+        preModoMaiusculo = true;
+    }
+    bufferAtivo  = false;
+    limparBuffer();
+}
+
+void limparBuffer() {
+    for (int i = 0; i < 6; i++) {
+        buffer[i] = HIGH;
+    }
+}
+
+void aguardarSoltarBotoes() {
+    for (int i = 0; i < 6; i++) {
+        while (digitalRead(PINOS_BRAILLE[i]) == LOW) {
+            delay(10);
+            i = -1; 
+        }
+    }
+    // Aguarda soltar o botão Shift Latch se ele estiver pressionado
+    while (digitalRead(pino_shift_latch) == LOW) {
+        delay(10);
+    }
+    
+    // Aguarda soltar o botão Número se ele estiver pressionado
+    while (digitalRead(pino_numero) == LOW) {
+        delay(10);
+    }
+    
+    delay(DEBOUNCE_DELAY);
+}
+
+// ===== PROCESSAMENTO PRINCIPAL (Decisão de Modo) =====
+void processarBuffer() {
+    bool b1 = (buffer[0] == LOW);
+    bool b2 = (buffer[1] == LOW);
+    bool b3 = (buffer[2] == LOW);
+    bool b4 = (buffer[3] == LOW);
+    bool b5 = (buffer[4] == LOW);
+    bool b6 = (buffer[5] == LOW);
+
+    // 1) Modo Número
+    if (modoNumero) {
+        processarBufferNumero(b1, b2, b3, b4, b5, b6);
+        return;
+    }
+    
+    // 🌟 2) Modo SHIFT (Ativado se modoShift for true)
+    if (modoShift) {
+        processarBufferShift(b1, b2, b3, b4, b5, b6);
+        return;
+    }
+
+    // 3) Modo Maiúsculo Fixo ou Pré-Maiúsculo
+    bool deveSerMaiusculo = modoMaiusculoFixo || preModoMaiusculo;
+
+    if (deveSerMaiusculo) {
+        processarBufferMaiusculo(b1, b2, b3, b4, b5, b6);
+        return;
+    }
+
+    // 4) Modo normal – letras minúsculas e sinais
+    char letra = '\0';
+    // Mapeamento de letras minúsculas e sinais (mantido)
+    
+    // ... (restante da lógica de minúsculas e símbolos, omitida para brevidade)
+      // A = 100000
+    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra = 'a'; }
+    // B = 110000
+    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = 'b'; }
+    // C = 100100
+    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { letra = 'c'; }
+    // D = 100110
+    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { letra = 'd'; }
+    // E = 100010
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { letra = 'e'; }
+    // F = 110100
+    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'f'; }
+    // G = 110110
+    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'g'; }
+    // H = 110010
+    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { letra = 'h'; }
+    // I = 010100
+    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'i'; }
+    // J = 010110
+    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'j'; }
+    // K = 101000
+    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { letra = 'k'; }
+    // L = 111000
+    else if (b1 && b2 && b3 && !b4 && !b5 && !b6) { letra = 'l'; }
+    // M = 101100
+    else if (b1 && !b2 && b3 && b4 && !b5 && !b6) { letra = 'm'; }
+    // N = 101110
+    else if (b1 && !b2 && b3 && b4 && b5 && !b6) { letra = 'n'; }
+    // O = 101010
+    else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra = 'o'; }
+    // P = 111100
+    else if (b1 && b2 && b3 && b4 && !b5 && !b6) { letra = 'p'; }
+    // Q = 111110
+    else if (b1 && b2 && b3 && b4 && b5 && !b6) { letra = 'q'; }
+    // R = 111010
+    else if (b1 && b2 && b3 && !b4 && b5 && !b6) { letra = 'r'; }
+    // S = 011100
+    else if (!b1 && b2 && b3 && b4 && !b5 && !b6) { letra = 's'; }
+    // T = 011110
+    else if (!b1 && b2 && b3 && b4 && b5 && !b6) { letra = 't'; }
+    // U = 101001
+    else if (b1 && !b2 && b3 && !b4 && !b5 && b6) { letra = 'u'; }
+    // V = 111001
+    else if (b1 && b2 && b3 && !b4 && !b5 && b6) { letra = 'v'; }
+    // W = 010111
+    else if (!b1 && b2 && !b3 && b4 && b5 && b6) { letra = 'w'; }
+    // X = 101101
+    else if (b1 && !b2 && b3 && b4 && !b5 && b6) { letra = 'x'; }
+    // Y = 101111
+    else if (b1 && !b2 && b3 && b4 && b5 && b6) { letra = 'y'; }
+    // Z = 101011
+    else if (b1 && !b2 && b3 && !b4 && b5 && b6) { letra = 'z'; }
+    // . = 010011
+    else if (!b1 && b2 && !b3 && !b4 && b5 && b6) { letra = '.'; }
+    // , = 010000
+    else if (!b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = ','; }
+    // ! = 011010
+    else if (!b1 && b2 && b3 && !b4 && b5 && !b6) { letra = '!'; }
+    // - = 001001
+    else if (!b1 && !b2 && b3 && !b4 && !b5 && b6) { letra = '-'; }
+    // ESPAÇO = 000000
+    else if (!b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra = ' '; }
+    // > = 101010
+    else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra = '>'; }
+    // < = 010101
+    else if (!b1 && b2 && !b3 && b4 && !b5 && b6) { letra = '<'; }
+    // + = 011010
+    else if (!b1 && b2 && b3 && !b4 && b5 && !b6) { letra = '+'; }
+    // ...
+    // Desconhecido
+    else {
+        letra = '?';
+    }
+
+    if (letra != '\0') {
+        Keyboard.write(letra);
+    }
+}
+
+// ===== PROCESSAMENTO DE NÚMEROS =====
+void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
+    // Código inalterado, mapeia A->1, B->2, etc.
+    char digito = '\0';
+    // 1 (A) = 100000
+    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { digito = '1'; }
+    // 2 (B) = 110000
+    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { digito = '2'; }
+    // 3 (C) = 100100
+    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { digito = '3'; }
+    // 4 (D) = 100110
+    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { digito = '4'; }
+    // 5 (E) = 100010
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { digito = '5'; }
+    // 6 (F) = 110100
+    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { digito = '6'; }
+    // 7 (G) = 110110
+    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { digito = '7'; }
+    // 8 (H) = 110010
+    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { digito = '8'; }
+    // 9 (I) = 010100
+    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { digito = '9'; }
+    // 0 (J) = 010110
+    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { digito = '0'; }
+    // ponto decimal = 010011
+    else if (!b1 && b2 && !b3 && !b4 && b5 && b6) { digito = '.'; }
+    else {
+        digito = '?';
+    }
+
+    if (digito != '\0') {
+        Keyboard.write(digito);
+    }
+}
+
+// ===== PROCESSAMENTO MAIÚSCULO (Caps Lock) =====
+void processarBufferMaiusculo(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
+    // Código inalterado, mapeia A->A, B->B, etc.
+    char letra_maiuscula = '\0'; 
+     // A = 100000
+    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'A'; } 
+    // B = 110000
+    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'B'; }
+    // C = 100100
+    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'C'; }
+    // D = 100110
+    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'D'; }
+    // E = 100010
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { letra_maiuscula = 'E'; }
+    // F = 110100
+    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'F'; }
+    // G = 110110
+    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'G'; }
+    // H = 110010
+    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { letra_maiuscula = 'H'; }
+    // I = 010100
+    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'I'; }
+    // J = 010110
+    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'J'; }
+    // K = 101000
+    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'K'; }
+    // L = 111000
+    else if (b1 && b2 && b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'L'; }
+    // M = 101100
+    else if (b1 && !b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'M'; }
+    // N = 101110
+    else if (b1 && !b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'N'; }
+    // O = 101010
+    else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra_maiuscula = 'O'; }
+    // P = 111100
+    else if (b1 && b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'P'; }
+    // Q = 111110
+    else if (b1 && b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'Q'; }
+    // R = 111010
+    else if (b1 && b2 && b3 && !b4 && b5 && !b6) { letra_maiuscula = 'R'; }
+    // S = 011100
+    else if (!b1 && b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'S'; }
+    // T = 011110
+    else if (!b1 && b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'T'; }
+    // U = 101001
+    else if (b1 && !b2 && b3 && !b4 && !b5 && b6) { letra_maiuscula = 'U'; }
+    // V = 111001
+    else if (b1 && b2 && b3 && !b4 && !b5 && b6) { letra_maiuscula = 'V'; }
+    // W = 010111
+    else if (!b1 && b2 && !b3 && b4 && b5 && b6) { letra_maiuscula = 'W'; }
+    // X = 101101
+    else if (b1 && !b2 && b3 && b4 && !b5 && b6) { letra_maiuscula = 'X'; }
+    // Y = 101111
+    else if (b1 && !b2 && b3 && b4 && b5 && b6) { letra_maiuscula = 'Y'; }
+    // Z = 101011
+    else if (b1 && !b2 && b3 && !b4 && b5 && b6) { letra_maiuscula = 'Z'; }
+
+    if (letra_maiuscula != '\0') {
+        Keyboard.write(letra_maiuscula);
+    } else {
+        processarBuffer(); 
+        return;
+    }
+}
+
+
+// 🌟 NOVO: PROCESSAMENTO SHIFT (Adiciona o modificador SHIFT da HID)
+void processarBufferShift(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
+    char caractere_base = '\0';
+
+    // Mapeamento das combinações Braille para o caractere base do teclado
+    // que, quando shifted, resulta no símbolo desejado.
+
+    // ! (Shift + 1) -> Padrão Braille 'A' (100000)
+    if (!b1 && b2 && b3 && !b4 && b5 && !b6) { caractere_base = '1'; }
+    // @ (Shift + 2) -> Padrão Braille 'B' (110000)
+    else if (b1 && !b2 && !b3 && !b4 && b5 && b6) { caractere_base = '2'; }
+    // # (Shift + 3) -> Padrão Braille 'C' (100100)
+    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { caractere_base = '3'; }
+    // $ (Shift + 4) -> Padrão Braille 'D' (100110)
+    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { caractere_base = '4'; }
+    // % (Shift + 5) -> Padrão Braille 'E' (100010)
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { caractere_base = '5'; }
+    // ^ (Shift + 6) -> Padrão Braille 'F' (110100)
+    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { caractere_base = '6'; }
+    // & (Shift + 7) -> Padrão Braille 'G' (110110)
+    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { caractere_base = '7'; }
+    // * (Shift + 8) -> Padrão Braille 'H' (110010)
+    else if (!b1 && !b2 && b3 && !b4 && b5 && !b6) { caractere_base = '8'; }
+    // ( (Shift + 9) -> Padrão Braille 'I' (010100)
+    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { caractere_base = '9'; }
+    // ) (Shift + 0) -> Padrão Braille 'J' (010110)
+    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { caractere_base = '0'; }
+    
+    // : (Shift + ;) -> Padrão Braille K (101000)
+    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { caractere_base = ';'; }
+
+    // + (Shift + =) -> Padrão Braille G (110110)
+    // Se quiser mapear outro:
+    // else if (...) { caractere_base = '='; }
+
+    else {
+        caractere_base = '\0'; 
+    }
+
+    if (caractere_base != '\0') {
+        // Sequência para enviar um caractere shifted:
+        Keyboard.press(KEY_LEFT_SHIFT); // Segura o SHIFT
+        Keyboard.write(caractere_base); // Envia o caractere base (ex: '1')
+        Keyboard.releaseAll();          // Solta o SHIFT e o caractere base
+    }
+}
