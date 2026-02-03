@@ -68,14 +68,14 @@ O Teclado Perkins via USB é um periférico voltado para entrada de texto em Bra
 
 ## Forma de utilização dos modos
 
-**Modo Maiúsculo (Caps Lock)**
-Ativado pela combinação Braille 000101 (Pontos 4 e 6). Um toque ativa o modo para a próxima letra; dois toques travam o Caps Lock. O botão Espaço desativa o trava-letras.
+**Modo Maiúsculo (Caps Lock):**
+- Ativado pela combinação Braille 000101 (Pontos 4 e 6). Um toque ativa o modo para a próxima letra; dois toques travam o Caps Lock. O botão Espaço desativa o trava-letras.
 
-**Modo Numérico**
-Ativado pelo botão físico no pino 4 ou pela combinação Braille 001111 (Pontos 3, 4, 5 e 6).
+**Modo Numérico:**
+- Ativado pelo botão físico no pino 4 ou pela combinação Braille 001111 (Pontos 3, 4, 5 e 6).
 
-**Shift**
-Permite que o próximo caractere digitado seja um símbolo especial (ex: ! ou @) sem ter que segurar o botão.
+**Shift:**
+- Permite que o próximo caractere digitado seja um símbolo especial (ex: ! ou @) sem ter que segurar o botão.
 
 ## Autoras
 - [Ana Luiza](https://share.google/TvTGWeP9tyLsO0Y1l)
