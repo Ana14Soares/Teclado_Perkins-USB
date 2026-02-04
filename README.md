@@ -26,7 +26,6 @@ O Teclado Perkins via USB é um periférico voltado para entrada de texto em Bra
 **Simulação e Testes:**  
 - **Wokwi** – plataforma de simulação online para testar circuitos e código do ESP32 antes da implementação física.
 
-
 ##  Pinagem
 
 ### Pontos Braille
