@@ -1,34 +1,35 @@
-#include "USB.h"
-#include "USBHIDKeyboard.h"
-#include "DFRobotDFPlayerMini.h"
-#include <HardwareSerial.h>
+#include "USB.h"
+#include "USBHIDKeyboard.h"
+#include "DFRobotDFPlayerMini.h"
+#include <HardwareSerial.h>
 
 // Inicializa o objeto teclado
 USBHIDKeyboard Keyboard;
 DFRobotDFPlayerMini myDFPlayer;
 HardwareSerial dfSerial(1);
 
-#define DF_RX 40 
-#define DF_TX 39 
+#define DF_RX 40 
+#define DF_TX 39 
+
 // Definição dos pinos Braille (Pontos 1 a 6)
 const int pino_b1 = 18; // Ponto 1
-const int pino_b2 = 7; // Ponto 2
-const int pino_b3 = 6; // Ponto 3
+const int pino_b2 = 7;  // Ponto 2
+const int pino_b3 = 6;  // Ponto 3
 const int pino_b4 = 17; // Ponto 4
 const int pino_b5 = 8;  // Ponto 5
 const int pino_b6 = 9;  // Ponto 6
 
 // Definição dos pinos das Teclas de Função
-const int pEnter      = 5; // Pino do botão Enter
+const int pEnter      = 5;  // Pino do botão Enter
 const int pEspaco     = 15; // Pino do botão Espaço (além do ponto Braille)
-const int pDelete     = 37;  // Pino do botão Delete/Backspace
-const int pino_numero = 4;  // Mantido pino 8 para o modo numérico (se for usado)
+const int pDelete     = 37; // Pino do botão Delete/Backspace
+const int pino_numero = 4;  // Mantido pino 4 para o modo numérico
 
 // NOVO PINO PARA O SHIFT FIXO/PEGAJOSO
 const int pino_shift_latch = 36;
-const int seta_dir = 48;
-const int seta_esq = 47;
-const int seta_up = 21;
+const int seta_dir  = 48;
+const int seta_esq  = 47;
+const int seta_up   = 21;
 const int seta_down = 35; 
 
 // Array para facilitar o acesso aos pinos Braille
@@ -37,9 +38,9 @@ const int PINOS_BRAILLE[6] = {pino_b1, pino_b2, pino_b3, pino_b4, pino_b5, pino_
 // Variáveis de controle de estado
 bool bufferAtivo = false;
 unsigned long tempoInicio = 0;
-const unsigned long TEMPO_ESPERA         = 300; 
-const unsigned long DEBOUNCE_DELAY       = 50;
-const unsigned long TEMPO_ESPERA_NUMERO  = 500;
+const unsigned long TEMPO_ESPERA           = 300; 
+const unsigned long DEBOUNCE_DELAY         = 50;
+const unsigned long TEMPO_ESPERA_NUMERO    = 500;
 const unsigned long TEMPO_ESPERA_MAIUSCULO = 600;
 
 int buffer[6]          = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
@@ -59,566 +60,540 @@ void aguardarSoltarBotoes();
 void processarBuffer();
 void ativarModoNumero();
 void ativarModoMaiusculo();
-void ativarModoShift(); // NOVO PROTÓTIPO
+void ativarModoShift();
 void processarBufferMaiusculo(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
 void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
 void processarBufferShift(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
-// Funções que usam o pino 8 precisam ser renomeadas no código se você quiser usá-lo para outra coisa.
-// Mantendo pino_numero = 8 para compatibilidade com o modo numérico Braille.
 
 // ===== SETUP =====
 void setup() {
-    Keyboard.begin();
-    USB.begin();
-    dfSerial.begin(9600, SERIAL_8N1, DF_RX, DF_TX);
-    delay(1000);
+    Keyboard.begin();
+    USB.begin();
+    dfSerial.begin(9600, SERIAL_8N1, DF_RX, DF_TX);
+    delay(1000);
 
-    // Pinos Braille com pull-up interno
-    for (int i = 0; i < 6; i++) {
-        pinMode(PINOS_BRAILLE[i], INPUT_PULLUP);
-    }
+    // Pinos Braille com pull-up interno
+    for (int i = 0; i < 6; i++) {
+        pinMode(PINOS_BRAILLE[i], INPUT_PULLUP);
+    }
 
-    if (!myDFPlayer.begin(dfSerial)) {
-    
-  } else {
-
-    myDFPlayer.volume(30); 
-  }
-    // Funções + botões de Modo
-    pinMode(pEnter,         INPUT_PULLUP);
-    pinMode(pEspaco,        INPUT_PULLUP);
-    pinMode(pDelete,        INPUT_PULLUP);
-    pinMode(seta_up,        INPUT_PULLUP);
-    pinMode(seta_down,       INPUT_PULLUP);
-    pinMode(seta_dir,       INPUT_PULLUP);
-    pinMode(seta_esq,       INPUT_PULLUP);
-    pinMode(pino_numero,    INPUT_PULLUP);
-    pinMode(pino_shift_latch, INPUT_PULLUP); // NOVO PINO
+    if (!myDFPlayer.begin(dfSerial)) {
+        // Falha ao iniciar (pode adicionar lógica de erro aqui se quiser)
+    } else {
+        myDFPlayer.volume(30); 
+    }
+    
+    // Funções + botões de Modo
+    pinMode(pEnter,           INPUT_PULLUP);
+    pinMode(pEspaco,          INPUT_PULLUP);
+    pinMode(pDelete,          INPUT_PULLUP);
+    pinMode(seta_up,          INPUT_PULLUP);
+    pinMode(seta_down,        INPUT_PULLUP);
+    pinMode(seta_dir,         INPUT_PULLUP);
+    pinMode(seta_esq,         INPUT_PULLUP);
+    pinMode(pino_numero,      INPUT_PULLUP);
+    pinMode(pino_shift_latch, INPUT_PULLUP); // NOVO PINO
 }
 
 // ===== LOOP =====
 void loop() {
-    // 1. Botões de função – prioridade máxima
-    if (digitalRead(pDelete) == LOW) {
-        Keyboard.write(KEY_BACKSPACE);
-        myDFPlayer.playFolder(4, 4);
-        while (digitalRead(pDelete) == LOW) { delay(10); }
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
+    // 1. Botões de função – prioridade máxima
+    if (digitalRead(pDelete) == LOW) {
+        Keyboard.write(KEY_BACKSPACE);
+        myDFPlayer.playFolder(4, 4);
+        while (digitalRead(pDelete) == LOW) { delay(10); }
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-    if (digitalRead(seta_up) == LOW) {
-        Keyboard.write(KEY_UP_ARROW);
-        myDFPlayer.playFolder(4, 5);
-        while (digitalRead(seta_up) == LOW) delay(10);
-        delay(DEBOUNCE_DELAY);
-        return;
-  }
+    if (digitalRead(seta_up) == LOW) {
+        Keyboard.write(KEY_UP_ARROW);
+        myDFPlayer.playFolder(4, 5);
+        while (digitalRead(seta_up) == LOW) delay(10);
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-    if (digitalRead(seta_down) == LOW) {
-        Keyboard.write(KEY_DOWN_ARROW);
-        myDFPlayer.playFolder(4, 6);
-        while (digitalRead(seta_down) == LOW) delay(10);
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
+    if (digitalRead(seta_down) == LOW) {
+        Keyboard.write(KEY_DOWN_ARROW);
+        myDFPlayer.playFolder(4, 6);
+        while (digitalRead(seta_down) == LOW) delay(10);
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-    if (digitalRead(seta_esq) == LOW) {
-        Keyboard.write(KEY_LEFT_ARROW);
-        myDFPlayer.playFolder(4, 7);
+    if (digitalRead(seta_esq) == LOW) {
+        Keyboard.write(KEY_LEFT_ARROW);
+        myDFPlayer.playFolder(4, 7);
+        while (digitalRead(seta_esq) == LOW) delay(10);
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-while (digitalRead(seta_esq) == LOW) delay(10);
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
+    if (digitalRead(seta_dir) == LOW) {
+        Keyboard.write(KEY_RIGHT_ARROW);
+        myDFPlayer.playFolder(4, 8);
+        while (digitalRead(seta_dir) == LOW) delay(10);
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-    if (digitalRead(seta_dir) == LOW) {
-        Keyboard.write(KEY_RIGHT_ARROW);
-        myDFPlayer.playFolder(4, 8);
-        while (digitalRead(seta_dir) == LOW) delay(10);
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
+    if (digitalRead(pEnter) == LOW) {
+        Keyboard.write(KEY_RETURN);
+        myDFPlayer.playFolder(4, 9);
+        while (digitalRead(pEnter) == LOW) { delay(10); }
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-    if (digitalRead(pEnter) == LOW) {
-        Keyboard.write(KEY_RETURN);
-        myDFPlayer.playFolder(4, 9);
-        while (digitalRead(pEnter) == LOW) { delay(10); }
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
+    // Lógica de desativação do Caps Lock pelo Espaço
+    if (digitalRead(pEspaco) == LOW) {
+        if (modoMaiusculoFixo) {
+            modoMaiusculoFixo = false; // Desliga Caps Lock
+        } else {
+            Keyboard.write(' ');
+            myDFPlayer.playFolder(4, 10);
+        }
+        while (digitalRead(pEspaco) == LOW) { delay(10); }
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-    // Lógica de desativação do Caps Lock pelo Espaço
-    if (digitalRead(pEspaco) == LOW) {
-        if (modoMaiusculoFixo) {
-            modoMaiusculoFixo = false; // Desliga Caps Lock
-        } else {
-            Keyboard.write(' ');
-            myDFPlayer.playFolder(4, 10);
-        }
-        while (digitalRead(pEspaco) == LOW) { delay(10); }
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
+    //  ATIVAÇÃO DO MODO SHIFT PELO PINO DEDICADO
+    if (digitalRead(pino_shift_latch) == LOW) {
+        ativarModoShift();
+        // Espera soltar o botão Shift
+        while (digitalRead(pino_shift_latch) == LOW) { delay(10); } 
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
+    
+    // 2. Leitura dos botões Braille
+    int leituraAtual[6];
+    bool algumPressionado      = false;
+    bool novasTeclasDetectadas = false;
+    
+    for (int i = 0; i < 6; i++) {
+        leituraAtual[i] = digitalRead(PINOS_BRAILLE[i]);
+        if (leituraAtual[i] == LOW) {
+            algumPressionado = true;
+        }
+    }
 
-    //  ATIVAÇÃO DO MODO SHIFT PELO PINO DEDICADO
-    if (digitalRead(pino_shift_latch) == LOW) {
-        ativarModoShift();
-        // Espera soltar o botão Shift
-        while (digitalRead(pino_shift_latch) == LOW) { delay(10); } 
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
-    
-    // 2. Leitura dos botões Braille
-    int leituraAtual[6];
-    bool algumPressionado      = false;
-    bool novasTeclasDetectadas = false;
-    
-    for (int i = 0; i < 6; i++) {
-        leituraAtual[i] = digitalRead(PINOS_BRAILLE[i]);
-        if (leituraAtual[i] == LOW) {
-            algumPressionado = true;
-        }
-    }
+    // Combinações de ativação de modo (Prefixos Braille)
+    
+    // Combinação MODO NÚMERO: 001111 (b3,b4,b5,b6)
+    bool combinacaoNumeroPressionada =
+        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&  
+         leituraAtual[2] == LOW  && leituraAtual[3] == LOW  &&  
+         leituraAtual[4] == LOW  && leituraAtual[5] == LOW);    
 
-    // Combinações de ativação de modo (Prefixos Braille)
-    
-    // Combinação MODO NÚMERO: 001111 (b3,b4,b5,b6)
-    bool combinacaoNumeroPressionada =
-        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&  
-         leituraAtual[2] == LOW  && leituraAtual[3] == LOW  &&  
-         leituraAtual[4] == LOW  && leituraAtual[5] == LOW);    
+    // Combinação MODO MAIÚSCULO: 000101 (b4,b6)
+    bool combinacaoMaiusculoPressionada =
+        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&  
+         leituraAtual[2] == HIGH && leituraAtual[3] == LOW  &&  
+         leituraAtual[4] == HIGH && leituraAtual[5] == LOW);    
 
-    // Combinação MODO MAIÚSCULO: 000101 (b4,b6)
-    bool combinacaoMaiusculoPressionada =
-        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&  
-         leituraAtual[2] == HIGH && leituraAtual[3] == LOW  &&  
-         leituraAtual[4] == HIGH && leituraAtual[5] == LOW);    
+    // ATIVAÇÃO DO MODO NÚMERO (botão físico ou prefixo Braille)
+    if (digitalRead(pino_numero) == LOW || combinacaoNumeroPressionada) {
+        ativarModoNumero();
+        if (digitalRead(pino_numero) == LOW) {
+            while (digitalRead(pino_numero) == LOW) { delay(10); }
+        }
+        if (combinacaoNumeroPressionada) {
+            aguardarSoltarBotoes();
+        }
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-    // ATIVAÇÃO DO MODO NÚMERO (botão físico ou prefixo Braille)
-    if (digitalRead(pino_numero) == LOW || combinacaoNumeroPressionada) {
-        ativarModoNumero();
-        if (digitalRead(pino_numero) == LOW) {
-            while (digitalRead(pino_numero) == LOW) { delay(10); }
-        }
-        if (combinacaoNumeroPressionada) {
-            aguardarSoltarBotoes();
-        }
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
+    // ATIVAÇÃO DO MODO MAIÚSCULO (Caps Lock)
+    if (combinacaoMaiusculoPressionada) {
+        ativarModoMaiusculo();
+        aguardarSoltarBotoes();
+        delay(DEBOUNCE_DELAY);
+        return;
+    }
 
-    // ATIVAÇÃO DO MODO MAIÚSCULO (Caps Lock)
-    if (combinacaoMaiusculoPressionada) {
-        ativarModoMaiusculo();
-        aguardarSoltarBotoes();
-        delay(DEBOUNCE_DELAY);
-        return;
-    }
+    // 3. Detecção de novas teclas (para controle de tempo)
+    for (int i = 0; i < 6; i++) {
+        if (leituraAtual[i] == LOW && leituraAnterior[i] == HIGH) {
+            novasTeclasDetectadas = true;
+        }
+    }
 
-    // 3. Detecção de novas teclas (para controle de tempo)
-    for (int i = 0; i < 6; i++) {
-        if (leituraAtual[i] == LOW && leituraAnterior[i] == HIGH) {
-            novasTeclasDetectadas = true;
-        }
-    }
+    // 4. Gerenciamento do buffer
+    if (algumPressionado && !bufferAtivo) {
+        bufferAtivo   = true;
+        tempoInicio   = millis();
+        limparBuffer();
+    }
 
-    // 4. Gerenciamento do buffer
-    if (algumPressionado && !bufferAtivo) {
-        bufferAtivo   = true;
-        tempoInicio   = millis();
-        limparBuffer();
-    }
+    if (bufferAtivo) {
+        // Guarda no buffer quais pontos foram pressionados
+        for (int i = 0; i < 6; i++) {
+            if (leituraAtual[i] == LOW) {
+                buffer[i] = LOW;
+            }
+        }
 
-    if (bufferAtivo) {
-        // Guarda no buffer quais pontos foram pressionados
-        for (int i = 0; i < 6; i++) {
-            if (leituraAtual[i] == LOW) {
-                buffer[i] = LOW;
-            }
-        }
+        if (novasTeclasDetectadas) {
+            tempoInicio = millis();
+        }
 
-        if (novasTeclasDetectadas) {
-            tempoInicio = millis();
-        }
+        // Escolhe tempo de espera de acordo com o modo
+        unsigned long tempoLimite;
+        if (modoNumero) {
+            tempoLimite = TEMPO_ESPERA_NUMERO;
+        } else if (modoMaiusculoFixo || preModoMaiusculo || modoShift) { // CORRIGIDO AQUI
+            // Usa o tempo maior se estiver em qualquer modo especial
+            tempoLimite = TEMPO_ESPERA_MAIUSCULO;
+        } else {
+            tempoLimite = TEMPO_ESPERA;
+        }
 
-        // Escolhe tempo de espera de acordo com o modo
-        unsigned long tempoLimite;
-        if (modoNumero) {
-            tempoLimite = TEMPO_ESPERA_NUMERO;
-        } else if (modoMaiusculomodoMaiusculoFixo || modoShift) {
-            // Usa o tempo maior se estiver em qualquer modo especial
-            tempoLimite = TEMPO_ESPERA_MAIUSCULO;
-        } else {
-            tempoLimite = TEMPO_ESPERA;
-        }
+        // Quando o tempo expira, processa a combinação
+        if (millis() - tempoInicio >= tempoLimite) {
+            processarBuffer();
+            aguardarSoltarBotoes();
+            bufferAtivo = false;
+            limparBuffer();
 
-        // Quando o tempo expira, processa a combinação
+            // Lógica de desativação de modos de 1 toque (Sticky Mode)
+            if (modoNumero) {
+                modoNumero = false;
+            }
 
-if (millis() - tempoInicio >= tempoLimite) {
-            processarBuffer();
-            aguardarSoltarBotoes();
-            bufferAtivo = false;
-            limparBuffer();
+            if (modoMaiusculo && !modoMaiusculoFixo) {
+                modoMaiusculo = false;
+            }
 
-            // Lógica de desativação de modos de 1 toque (Sticky Mode)
-            if (modoNumero) {
-                modoNumero = false;
-            }
+            if (preModoMaiusculo) {
+                preModoMaiusculo = false;
+            }
+            
+            //  DESATIVA O MODO SHIFT APÓS UMA COMBINAÇÃO SER PROCESSADA
+            if (modoShift) {
+                modoShift = false;
+            }
+        }
+    }
 
-            if (modoMaiusculo && !modoMaiusculoFixo) {
-                modoMaiusculo = false;
-            }
+    // 5. Atualiza estados anteriores
+    for (int i = 0; i < 6; i++) {
+        leituraAnterior[i] = leituraAtual[i];
+    }
 
-            if (preModoMaiusculo) {
-                preModoMaiusculo = false;
-            }
-            
-            //  DESATIVA O MODO SHIFT APÓS UMA COMBINAÇÃO SER PROCESSADA
-            if (modoShift) {
-                modoShift = false;
-            }
-        }
-    }
-
-    // 5. Atualiza estados anteriores
-    for (int i = 0; i < 6; i++) {
-        leituraAnterior[i] = leituraAtual[i];
-    }
-
-    delay(10);
+    delay(10);
 }
 
 // ===== FUNÇÕES AUXILIARES DE ATIVAÇÃO =====
 
 // NOVO: Ativa o modo Shift Fixo/Pegajoso (Sticky)
 void ativarModoShift() {
-    modoShift = !modoShift; // Alterna (liga/desliga)
-    bufferAtivo = false;
-    limparBuffer();
-    myDFPlayer.playFolder(4, 3);
+    modoShift = !modoShift; // Alterna (liga/desliga)
+    bufferAtivo = false;
+    limparBuffer();
+    myDFPlayer.playFolder(4, 3);
 }
 
 void ativarModoNumero() {
-    modoNumero   = !modoNumero;
-    bufferAtivo  = false;
-    limparBuffer();
-    myDFPlayer.playFolder(4, 2);
-    
+    modoNumero   = !modoNumero;
+    bufferAtivo  = false;
+    limparBuffer();
+    myDFPlayer.playFolder(4, 2);
 }
 
 void ativarModoMaiusculo() {
-    if (preModoMaiusculo) {
-        modoMaiusculoFixo = true; 
-        preModoMaiusculo = false;
-    } else if (modoMaiusculoFixo) {
-        modoMaiusculoFixo = false;
-    } else {
-        preModoMaiusculo = true;
-    }
-    bufferAtivo  = false;
-    limparBuffer();
-    myDFPlayer.playFolder(4, 1);
+    if (preModoMaiusculo) {
+        modoMaiusculoFixo = true; 
+        preModoMaiusculo = false;
+    } else if (modoMaiusculoFixo) {
+        modoMaiusculoFixo = false;
+    } else {
+        preModoMaiusculo = true;
+    }
+    bufferAtivo  = false;
+    limparBuffer();
+    myDFPlayer.playFolder(4, 1);
 }
 
 void limparBuffer() {
-    for (int i = 0; i < 6; i++) {
-        buffer[i] = HIGH;
-    }
+    for (int i = 0; i < 6; i++) {
+        buffer[i] = HIGH;
+    }
 }
 
 void aguardarSoltarBotoes() {
-    for (int i = 0; i < 6; i++) {
-        while (digitalRead(PINOS_BRAILLE[i]) == LOW) {
-            delay(10);
-            i = -1; 
-        }
-    }
-    // Aguarda soltar o botão Shift Latch se ele estiver pressionado
-    while (digitalRead(pino_shift_latch) == LOW) {
-        delay(10);
-    }
-    
-    // Aguarda soltar o botão Número se ele estiver pressionado
-    while (digitalRead(pino_numero) == LOW) {
-        delay(10);
-    }
-    
-    delay(DEBOUNCE_DELAY);
+    for (int i = 0; i < 6; i++) {
+        while (digitalRead(PINOS_BRAILLE[i]) == LOW) {
+            delay(10);
+            i = -1; 
+        }
+    }
+    // Aguarda soltar o botão Shift Latch se ele estiver pressionado
+    while (digitalRead(pino_shift_latch) == LOW) {
+        delay(10);
+    }
+    
+    // Aguarda soltar o botão Número se ele estiver pressionado
+    while (digitalRead(pino_numero) == LOW) {
+        delay(10);
+    }
+    
+    delay(DEBOUNCE_DELAY);
 }
 
 // ===== PROCESSAMENTO PRINCIPAL (Decisão de Modo) =====
 void processarBuffer() {
-    bool b1 = (buffer[0] == LOW);
-    bool b2 = (buffer[1] == LOW);
-    bool b3 = (buffer[2] == LOW);
-    bool b4 = (buffer[3] == LOW);
-    bool b5 = (buffer[4] == LOW);
-    bool b6 = (buffer[5] == LOW);
+    bool b1 = (buffer[0] == LOW);
+    bool b2 = (buffer[1] == LOW);
+    bool b3 = (buffer[2] == LOW);
+    bool b4 = (buffer[3] == LOW);
+    bool b5 = (buffer[4] == LOW);
+    bool b6 = (buffer[5] == LOW);
 
-    // 1) Modo Número
-    if (modoNumero) {
-        processarBufferNumero(b1, b2, b3, b4, b5, b6);
-        return;
-    }
-    
-    //  2) Modo SHIFT (Ativado se modoShift for true)
-    if (modoShift) {
-        processarBufferShift(b1, b2, b3, b4, b5, b6);
-        return;
-    }
+    // 1) Modo Número
+    if (modoNumero) {
+        processarBufferNumero(b1, b2, b3, b4, b5, b6);
+        return;
+    }
+    
+    //  2) Modo SHIFT (Ativado se modoShift for true)
+    if (modoShift) {
+        processarBufferShift(b1, b2, b3, b4, b5, b6);
+        return;
+    }
 
-    // 3) Modo Maiúsculo Fixo ou Pré-Maiúsculo
-    bool deveSerMaiusculo = modoMaiusculoFixo || preModoMaiusculo;
+    // 3) Modo Maiúsculo Fixo ou Pré-Maiúsculo
+    bool deveSerMaiusculo = modoMaiusculoFixo || preModoMaiusculo;
 
-    if (deveSerMaiusculo) {
-        processarBufferMaiusculo(b1, b2, b3, b4, b5, b6);
-        return;
-    }
+    if (deveSerMaiusculo) {
+        processarBufferMaiusculo(b1, b2, b3, b4, b5, b6);
+        return;
+    }
 
-    // 4) Modo normal – letras minúsculas e sinais
-    char letra = '\0';
-    int audio = 0;
-    // Mapeamento de letras minúsculas e sinais (mantido)
-    
-    // ... (restante da lógica de minúsculas e símbolos, omitida para brevidade)
-      // A = 100000
-    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra = 'a'; audio = 1; }
-    // B = 110000
-    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = 'b'; audio = 2; }
-    // C = 100100
-    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { letra = 'c'; audio = 3; }
-    // D = 100110
-    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { letra = 'd'; audio = 4; }
-    // E = 100010
-    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { letra = 'e'; audio = 5; }
-    // F = 110100
-    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'f'; audio  = 6; }
-    // G = 110110
-    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'g'; audio = 7; }
-    // H = 110010
-    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { letra = 'h'; audio = 8; }
-    // I = 010100
-    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'i'; audio = 9; }
-    // J = 010110
+    // 4) Modo normal – letras minúsculas e sinais
+    char letra = '\0';
+    int audio = 0;
+    
+    // A = 100000
+    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra = 'a'; audio = 1; }
+    // B = 110000
+    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = 'b'; audio = 2; }
+    // C = 100100
+    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { letra = 'c'; audio = 3; }
+    // D = 100110
+    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { letra = 'd'; audio = 4; }
+    // E = 100010
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { letra = 'e'; audio = 5; }
+    // F = 110100
+    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'f'; audio  = 6; }
+    // G = 110110
+    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'g'; audio = 7; }
+    // H = 110010
+    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { letra = 'h'; audio = 8; }
+    // I = 010100
+    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'i'; audio = 9; }
+    // J = 010110
+    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'j'; audio = 10; }
+    // K = 101000
+    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { letra = 'k'; audio = 11; }
+    // L = 111000
+    else if (b1 && b2 && b3 && !b4 && !b5 && !b6) { letra = 'l'; audio = 12; }
+    // M = 101100
+    else if (b1 && !b2 && b3 && b4 && !b5 && !b6) { letra = 'm'; audio = 13; }
+    // N = 101110
+    else if (b1 && !b2 && b3 && b4 && b5 && !b6) { letra = 'n'; audio = 14; }
+    // O = 101010
+    else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra = 'o'; audio = 15; }
+    // P = 111100
+    else if (b1 && b2 && b3 && b4 && !b5 && !b6) { letra = 'p'; audio = 16; }
+    // Q = 111110
+    else if (b1 && b2 && b3 && b4 && b5 && !b6) { letra = 'q'; audio = 17; }
+    // R = 111010
+    else if (b1 && b2 && b3 && !b4 && b5 && !b6) { letra = 'r'; audio = 18; }
+    // S = 011100
+    else if (!b1 && b2 && b3 && b4 && !b5 && !b6) { letra = 's'; audio = 19; }
+    // T = 011110
+    else if (!b1 && b2 && b3 && b4 && b5 && !b6) { letra = 't'; audio = 20; }
+    // U = 101001
+    else if (b1 && !b2 && b3 && !b4 && !b5 && b6) { letra = 'u'; audio = 21; }
+    // V = 111001
+    else if (b1 && b2 && b3 && !b4 && !b5 && b6) { letra = 'v'; audio = 22; }
+    // W = 010111
+    else if (!b1 && b2 && !b3 && b4 && b5 && b6) { letra = 'w'; audio = 23; }
+    // X = 101101
+    else if (b1 && !b2 && b3 && b4 && !b5 && b6) { letra = 'x'; audio = 24; }
+    // Y = 101111
+    else if (b1 && !b2 && b3 && b4 && b5 && b6) { letra = 'y'; audio = 25; }
+    // Z = 101011
+    else if (b1 && !b2 && b3 && !b4 && b5 && b6) { letra = 'z'; audio = 26; }
+    // . = 010011
+    else if (!b1 && b2 && !b3 && !b4 && b5 && b6) { letra = '.'; audio = 27; }
+    // , = 010000
+    else if (!b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = ','; audio = 28; }
+    // + = 011010
+    else if (!b1 && b2 && b3 && !b4 && b5 && !b6) { letra = '+'; audio = 29; }
+    // Desconhecido
+    else {
+        letra = '?';
+    }
 
-else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'j'; audio = 10; }
-    // K = 101000
-    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { letra = 'k'; audio = 11; }
-    // L = 111000
-    else if (b1 && b2 && b3 && !b4 && !b5 && !b6) { letra = 'l'; audio = 12; }
-    // M = 101100
-    else if (b1 && !b2 && b3 && b4 && !b5 && !b6) { letra = 'm'; audio = 13; }
-    // N = 101110
-    else if (b1 && !b2 && b3 && b4 && b5 && !b6) { letra = 'n'; audio = 14; }
-    // O = 101010
-    else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra = 'o'; audio = 15; }
-    // P = 111100
-    else if (b1 && b2 && b3 && b4 && !b5 && !b6) { letra = 'p'; audio = 16; }
-    // Q = 111110
-    else if (b1 && b2 && b3 && b4 && b5 && !b6) { letra = 'q'; audio = 17; }
-    // R = 111010
-    else if (b1 && b2 && b3 && !b4 && b5 && !b6) { letra = 'r'; audio = 18; }
-    // S = 011100
-    else if (!b1 && b2 && b3 && b4 && !b5 && !b6) { letra = 's'; audio = 19; }
-    // T = 011110
-    else if (!b1 && b2 && b3 && b4 && b5 && !b6) { letra = 't'; audio = 20; }
-    // U = 101001
-    else if (b1 && !b2 && b3 && !b4 && !b5 && b6) { letra = 'u'; audio = 21; }
-    // V = 111001
-    else if (b1 && b2 && b3 && !b4 && !b5 && b6) { letra = 'v'; audio = 22; }
-    // W = 010111
-    else if (!b1 && b2 && !b3 && b4 && b5 && b6) { letra = 'w'; audio = 23; }
-    // X = 101101
-    else if (b1 && !b2 && b3 && b4 && !b5 && b6) { letra = 'x'; audio = 24; }
-    // Y = 101111
-    else if (b1 && !b2 && b3 && b4 && b5 && b6) { letra = 'y'; audio = 25; }
-    // Z = 101011
-    else if (b1 && !b2 && b3 && !b4 && b5 && b6) { letra = 'z'; audio = 26; }
-    // . = 010011
-    else if (!b1 && b2 && !b3 && !b4 && b5 && b6) { letra = '.'; audio = 27; }
-    // , = 010000
-    else if (!b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = ','; audio = 28; }
-    // + = 011010
-    else if (!b1 && b2 && b3 && !b4 && b5 && !b6) { letra = '+'; audio = 29; }
-    // ...
-    // Desconhecido
-    else {
-        letra = '?';
-    }
-
-    if (letra != '\0') {
-        Keyboard.write(letra);
-        if (audio > 0) {
-          myDFPlayer.playFolder(1, audio);
-        }
- 
-    }
+    if (letra != '\0') {
+        Keyboard.write(letra);
+        if (audio > 0) {
+          myDFPlayer.playFolder(1, audio);
+        }
+    }
 }
 
 // ===== PROCESSAMENTO DE NÚMEROS =====
 void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
-    // Código inalterado, mapeia A->1, B->2, etc.
-    char digito = '\0';
-    int audio = 0;
-    // 1 (A) = 100000
-    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { digito = '1'; audio = 1;}
-    // 2 (B) = 110000
-    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { digito = '2'; audio = 2;}
-    // 3 (C) = 100100
-    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { digito = '3'; audio = 3;}
-    // 4 (D) = 100110
-    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { digito = '4'; audio = 4;}
-    // 5 (E) = 100010
-    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { digito = '5'; audio = 5;}
-    // 6 (F) = 110100
-    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { digito = '6'; audio = 6;}
-    // 7 (G) = 110110
-    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { digito = '7'; audio = 7;}
-    // 8 (H) = 110010
-    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { digito = '8'; audio = 8;}
-    // 9 (I) = 010100
-    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { digito = '9'; audio = 9;}
-    // 0 (J) = 010110
-    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { digito = '0'; audio = 10;}
-    else {
-        digito = '?';
-    }
+    char digito = '\0';
+    int audio = 0;
+    // 1 (A) = 100000
+    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { digito = '1'; audio = 1;}
+    // 2 (B) = 110000
+    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { digito = '2'; audio = 2;}
+    // 3 (C) = 100100
+    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { digito = '3'; audio = 3;}
+    // 4 (D) = 100110
+    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { digito = '4'; audio = 4;}
+    // 5 (E) = 100010
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { digito = '5'; audio = 5;}
+    // 6 (F) = 110100
+    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { digito = '6'; audio = 6;}
+    // 7 (G) = 110110
+    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { digito = '7'; audio = 7;}
+    // 8 (H) = 110010
+    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { digito = '8'; audio = 8;}
+    // 9 (I) = 010100
+    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { digito = '9'; audio = 9;}
+    // 0 (J) = 010110
+    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { digito = '0'; audio = 10;}
+    else {
+        digito = '?';
+    }
 
-    if (digito != '\0') {
-        Keyboard.write(digito);
-        if (audio > 0) {
-          myDFPlayer.playFolder(2, audio);
-        }
- 
-    }
+    if (digito != '\0') {
+        Keyboard.write(digito);
+        if (audio > 0) {
+          myDFPlayer.playFolder(2, audio);
+        }
+    }
 }
 
 // ===== PROCESSAMENTO MAIÚSCULO (Caps Lock) =====
 void processarBufferMaiusculo(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
-    // Código inalterado, mapeia A->A, B->B, etc.
-    char letra_maiuscula = '\0'; 
-    int audio = 0;
-     // A = 100000
-    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'A'; audio = 1;} 
-    // B = 110000
-    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'B'; audio = 2;}
-    // C = 100100
-    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'C'; audio = 3;}
+    char letra_maiuscula = '\0'; 
+    int audio = 0;
+     // A = 100000
+    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'A'; audio = 1;} 
+    // B = 110000
+    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'B'; audio = 2;}
+    // C = 100100
+    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'C'; audio = 3;}
+    // D = 100110
+    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'D'; audio = 4;}
+    // E = 100010
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { letra_maiuscula = 'E'; audio = 5;}
+    // F = 110100
+    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'F'; audio = 6;}
+    // G = 110110
+    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'G'; audio = 7;}
+    // H = 110010
+    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { letra_maiuscula = 'H'; audio = 8;}
+    // I = 010100
+    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'I'; audio = 9;}
+    // J = 010110
+    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'J'; audio = 10;}
+    // K = 101000
+    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'K'; audio = 11;}
+    // L = 111000
+    else if (b1 && b2 && b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'L'; audio = 12;}
+    // M = 101100
+    else if (b1 && !b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'M'; audio = 13;}
+    // N = 101110
+    else if (b1 && !b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'N'; audio = 14;}
+    // O = 101010
+    else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra_maiuscula = 'O'; audio = 15;}
+    // P = 111100
+    else if (b1 && b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'P'; audio = 16;}
+    // Q = 111110
+    else if (b1 && b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'Q'; audio = 17;}
+    // R = 111010
+    else if (b1 && b2 && b3 && !b4 && b5 && !b6) { letra_maiuscula = 'R'; audio = 18;}
+    // S = 011100
+    else if (!b1 && b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'S'; audio = 19;}
+    // T = 011110
+    else if (!b1 && b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'T'; audio = 20;}
+    // U = 101001
+    else if (b1 && !b2 && b3 && !b4 && !b5 && b6) { letra_maiuscula = 'U'; audio = 21;}
+    // V = 111001
+    else if (b1 && b2 && b3 && !b4 && !b5 && b6) { letra_maiuscula = 'V'; audio = 22;}
+    // W = 010111
+    else if (!b1 && b2 && !b3 && b4 && b5 && b6) { letra_maiuscula = 'W'; audio = 23;}
+    // X = 101101
+    else if (b1 && !b2 && b3 && b4 && !b5 && b6) { letra_maiuscula = 'X'; audio = 24;}
+    // Y = 101111
+    else if (b1 && !b2 && b3 && b4 && b5 && b6) { letra_maiuscula = 'Y'; audio = 25;}
+    // Z = 101011
+    else if (b1 && !b2 && b3 && !b4 && b5 && b6) { letra_maiuscula = 'Z'; audio = 26;}
 
-// D = 100110
-    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'D'; audio = 4;}
-    // E = 100010
-    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { letra_maiuscula = 'E'; audio = 5;}
-    // F = 110100
-    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'F'; audio = 6;}
-    // G = 110110
-    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'G'; audio = 7;}
-    // H = 110010
-    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { letra_maiuscula = 'H'; audio = 8;}
-    // I = 010100
-    else if (!b1 && b2 && !b3 && b4 && !b5 && !b6) { letra_maiuscula = 'I'; audio = 9;}
-    // J = 010110
-    else if (!b1 && b2 && !b3 && b4 && b5 && !b6) { letra_maiuscula = 'J'; audio = 10;}
-    // K = 101000
-    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'K'; audio = 11;}
-    // L = 111000
-    else if (b1 && b2 && b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'L'; audio = 12;}
-    // M = 101100
-    else if (b1 && !b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'M'; audio = 13;}
-    // N = 101110
-    else if (b1 && !b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'N'; audio = 14;}
-    // O = 101010
-    else if (b1 && !b2 && b3 && !b4 && b5 && !b6) { letra_maiuscula = 'O'; audio = 15;}
-    // P = 111100
-    else if (b1 && b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'P'; audio = 16;}
-    // Q = 111110
-    else if (b1 && b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'Q'; audio = 17;}
-    // R = 111010
-    else if (b1 && b2 && b3 && !b4 && b5 && !b6) { letra_maiuscula = 'R'; audio = 18;}
-    // S = 011100
-    else if (!b1 && b2 && b3 && b4 && !b5 && !b6) { letra_maiuscula = 'S'; audio = 19;}
-    // T = 011110
-    else if (!b1 && b2 && b3 && b4 && b5 && !b6) { letra_maiuscula = 'T'; audio = 20;}
-    // U = 101001
-    else if (b1 && !b2 && b3 && !b4 && !b5 && b6) { letra_maiuscula = 'U'; audio = 21;}
-    // V = 111001
-    else if (b1 && b2 && b3 && !b4 && !b5 && b6) { letra_maiuscula = 'V'; audio = 22;}
-    // W = 010111
-    else if (!b1 && b2 && !b3 && b4 && b5 && b6) { letra_maiuscula = 'W'; audio = 23;}
-    // X = 101101
-    else if (b1 && !b2 && b3 && b4 && !b5 && b6) { letra_maiuscula = 'X'; audio = 24;}
-    // Y = 101111
-    else if (b1 && !b2 && b3 && b4 && b5 && b6) { letra_maiuscula = 'Y'; audio = 25;}
-    // Z = 101011
-    else if (b1 && !b2 && b3 && !b4 && b5 && b6) { letra_maiuscula = 'Z'; audio = 26;}
-
-    if (letra_maiuscula != '\0') {
-        Keyboard.write(letra_maiuscula);
-        if (audio > 0) {
-          myDFPlayer.playFolder(1, audio);
-        }
-    } else {
-        processarBuffer(); 
-        return;
-    }
+    if (letra_maiuscula != '\0') {
+        Keyboard.write(letra_maiuscula);
+        if (audio > 0) {
+          myDFPlayer.playFolder(1, audio);
+        }
+    } else {
+        processarBuffer(); 
+        return;
+    }
 }
-
 
 // ===== PROCESSAMENTO SHIFT (Ajustado para sair ":" corretamente) =====
 void processarBufferShift(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
-    char caractere_base = '\0';
-    int audio = 0;
-    bool usarShift = true; 
+    char caractere_base = '\0';
+    int audio = 0;
+    bool usarShift = true; 
 
-    // ! (Shift + 1)
-    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { caractere_base = '1'; audio = 1; }
-    
-    // @ (Shift + 2)
-    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { caractere_base = '2'; audio = 2; }
-    
-    // # (Shift + 3)
-    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { caractere_base = '3'; audio = 3; }
-    
-    // $ (Shift + 4)
-    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { caractere_base = '4'; audio = 4; }
-    
-    // % (Shift + 5)
-    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { caractere_base = '5'; audio = 5; } 
+    // ! (Shift + 1)
+    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { caractere_base = '1'; audio = 1; }
+    // @ (Shift + 2)
+    else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { caractere_base = '2'; audio = 2; }
+    // # (Shift + 3)
+    else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { caractere_base = '3'; audio = 3; }
+    // $ (Shift + 4)
+    else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { caractere_base = '4'; audio = 4; }
+    // % (Shift + 5)
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { caractere_base = '5'; audio = 5; } 
+    // * (Shift + 8)
+    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { caractere_base = '8'; audio = 6; }
+    // : (Dois Pontos) -> Mudado para ';' para garantir o ":" no terminal
+    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { caractere_base = ';' ; audio = 7; }
+    // + (Shift + =)
+    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { caractere_base = '='; audio = 8; }
+    // . (Ponto Final) -> Braille Ponto 3
+    else if (!b1 && !b2 && b3 && !b4 && !b5 && !b6) { 
+        caractere_base = '.'; 
+        audio = 9; 
+        usarShift = false; 
+    } else {
+        caractere_base = '\0'; 
+    }
 
-    // * (Shift + 8)
-    else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { caractere_base = '8'; audio = 6; }
-    
-    // : (Dois Pontos) -> Mudado para ';' para garantir o ":" no terminal
-    else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { caractere_base = ';' ; audio = 7; }
+    if (caractere_base != '\0') {
+        if (usarShift) {
+            Keyboard.press(KEY_LEFT_SHIFT);
+            Keyboard.write(caractere_base);
+            Keyboard.releaseAll();
+        } else {
+            Keyboard.write(caractere_base);
+        }
 
-    // + (Shift + =)
-    else if (b1 && b2 && !b3 && b4 && b5 && !b6) { caractere_base = '='; audio = 8; }
-
-    // . (Ponto Final) -> Braille Ponto 3
-    else if (!b1 && !b2 && b3 && !b4 && !b5 && !b6) { 
-        caractere_base = '.'; 
-        audio = 9; 
-        usarShift = false; 
-    }
-
-    else {
-        caractere_base = '\0'; 
-    }
-
-    if (caractere_base != '\0') {
-
-if (usarShift) {
-            Keyboard.press(KEY_LEFT_SHIFT);
-            Keyboard.write(caractere_base);
-            Keyboard.releaseAll();
-        } else {
-            Keyboard.write(caractere_base);
-        }
-
-        if (audio > 0) {
-            myDFPlayer.playFolder(3, audio);
-        }
-    }
+        if (audio > 0) {
+            myDFPlayer.playFolder(3, audio);
+        }
+    }
 }
