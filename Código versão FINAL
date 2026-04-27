@@ -8,29 +8,28 @@ USBHIDKeyboard Keyboard;
 DFRobotDFPlayerMini myDFPlayer;
 HardwareSerial dfSerial(1);
 
-#define DF_RX 40 
-#define DF_TX 39 
-
+#define DF_RX 40
+#define DF_TX 39
 // Definição dos pinos Braille (Pontos 1 a 6)
 const int pino_b1 = 18; // Ponto 1
-const int pino_b2 = 7;  // Ponto 2
-const int pino_b3 = 6;  // Ponto 3
+const int pino_b2 = 7; // Ponto 2
+const int pino_b3 = 6; // Ponto 3
 const int pino_b4 = 17; // Ponto 4
-const int pino_b5 = 8;  // Ponto 5
-const int pino_b6 = 9;  // Ponto 6
+const int pino_b5 = 8; // Ponto 5
+const int pino_b6 = 9; // Ponto 6
 
 // Definição dos pinos das Teclas de Função
-const int pEnter      = 5;  // Pino do botão Enter
-const int pEspaco     = 15; // Pino do botão Espaço (além do ponto Braille)
-const int pDelete     = 37; // Pino do botão Delete/Backspace
-const int pino_numero = 4;  // Mantido pino 4 para o modo numérico
+const int pEnter = 5; // Pino do botão Enter
+const int pEspaco = 15; // Pino do botão Espaço (além do ponto Braille)
+const int pDelete = 37; // Pino do botão Delete/Backspace
+const int pino_numero = 4; // Mantido pino 8 para o modo numérico (se for usado)
 
 // NOVO PINO PARA O SHIFT FIXO/PEGAJOSO
 const int pino_shift_latch = 36;
-const int seta_dir  = 48;
-const int seta_esq  = 47;
-const int seta_up   = 21;
-const int seta_down = 35; 
+const int seta_dir = 48;
+const int seta_esq = 47;
+const int seta_up = 21;
+const int seta_down = 35;
 
 // Array para facilitar o acesso aos pinos Braille
 const int PINOS_BRAILLE[6] = {pino_b1, pino_b2, pino_b3, pino_b4, pino_b5, pino_b6};
@@ -38,12 +37,12 @@ const int PINOS_BRAILLE[6] = {pino_b1, pino_b2, pino_b3, pino_b4, pino_b5, pino_
 // Variáveis de controle de estado
 bool bufferAtivo = false;
 unsigned long tempoInicio = 0;
-const unsigned long TEMPO_ESPERA           = 300; 
-const unsigned long DEBOUNCE_DELAY         = 50;
-const unsigned long TEMPO_ESPERA_NUMERO    = 500;
+const unsigned long TEMPO_ESPERA = 300;
+const unsigned long DEBOUNCE_DELAY = 50;
+const unsigned long TEMPO_ESPERA_NUMERO = 500;
 const unsigned long TEMPO_ESPERA_MAIUSCULO = 600;
 
-int buffer[6]          = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
+int buffer[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
 int leituraAnterior[6] = {HIGH, HIGH, HIGH, HIGH, HIGH, HIGH};
 
 // Controle de modo
@@ -52,7 +51,7 @@ bool modoMaiusculo = false;
 bool preModoMaiusculo = false;
 bool modoMaiusculoFixo = false;
 // NOVO: Modo Shift (ativado por clique, desativado após 1 caractere)
-bool modoShift = false; 
+bool modoShift = false;
 
 // Protótipos
 void limparBuffer();
@@ -60,10 +59,12 @@ void aguardarSoltarBotoes();
 void processarBuffer();
 void ativarModoNumero();
 void ativarModoMaiusculo();
-void ativarModoShift();
+void ativarModoShift(); // NOVO PROTÓTIPO
 void processarBufferMaiusculo(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
 void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
 void processarBufferShift(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6);
+// Funções que usam o pino 8 precisam ser renomeadas no código se você quiser usá-lo para outra coisa.
+// Mantendo pino_numero = 8 para compatibilidade com o modo numérico Braille.
 
 // ===== SETUP =====
 void setup() {
@@ -78,20 +79,18 @@ void setup() {
     }
 
     if (!myDFPlayer.begin(dfSerial)) {
-        // Falha ao iniciar (pode adicionar lógica de erro aqui se quiser)
     } else {
-        myDFPlayer.volume(30); 
+        myDFPlayer.volume(30);
     }
-    
     // Funções + botões de Modo
-    pinMode(pEnter,           INPUT_PULLUP);
-    pinMode(pEspaco,          INPUT_PULLUP);
-    pinMode(pDelete,          INPUT_PULLUP);
-    pinMode(seta_up,          INPUT_PULLUP);
-    pinMode(seta_down,        INPUT_PULLUP);
-    pinMode(seta_dir,         INPUT_PULLUP);
-    pinMode(seta_esq,         INPUT_PULLUP);
-    pinMode(pino_numero,      INPUT_PULLUP);
+    pinMode(pEnter, INPUT_PULLUP);
+    pinMode(pEspaco, INPUT_PULLUP);
+    pinMode(pDelete, INPUT_PULLUP);
+    pinMode(seta_up, INPUT_PULLUP);
+    pinMode(seta_down, INPUT_PULLUP);
+    pinMode(seta_dir, INPUT_PULLUP);
+    pinMode(seta_esq, INPUT_PULLUP);
+    pinMode(pino_numero, INPUT_PULLUP);
     pinMode(pino_shift_latch, INPUT_PULLUP); // NOVO PINO
 }
 
@@ -159,20 +158,20 @@ void loop() {
         return;
     }
 
-    //  ATIVAÇÃO DO MODO SHIFT PELO PINO DEDICADO
+    // ATIVAÇÃO DO MODO SHIFT PELO PINO DEDICADO
     if (digitalRead(pino_shift_latch) == LOW) {
         ativarModoShift();
         // Espera soltar o botão Shift
-        while (digitalRead(pino_shift_latch) == LOW) { delay(10); } 
+        while (digitalRead(pino_shift_latch) == LOW) { delay(10); }
         delay(DEBOUNCE_DELAY);
         return;
     }
-    
+
     // 2. Leitura dos botões Braille
     int leituraAtual[6];
-    bool algumPressionado      = false;
+    bool algumPressionado = false;
     bool novasTeclasDetectadas = false;
-    
+
     for (int i = 0; i < 6; i++) {
         leituraAtual[i] = digitalRead(PINOS_BRAILLE[i]);
         if (leituraAtual[i] == LOW) {
@@ -181,18 +180,17 @@ void loop() {
     }
 
     // Combinações de ativação de modo (Prefixos Braille)
-    
     // Combinação MODO NÚMERO: 001111 (b3,b4,b5,b6)
     bool combinacaoNumeroPressionada =
-        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&  
-         leituraAtual[2] == LOW  && leituraAtual[3] == LOW  &&  
-         leituraAtual[4] == LOW  && leituraAtual[5] == LOW);    
+        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&
+         leituraAtual[2] == LOW && leituraAtual[3] == LOW &&
+         leituraAtual[4] == LOW && leituraAtual[5] == LOW);
 
     // Combinação MODO MAIÚSCULO: 000101 (b4,b6)
     bool combinacaoMaiusculoPressionada =
-        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&  
-         leituraAtual[2] == HIGH && leituraAtual[3] == LOW  &&  
-         leituraAtual[4] == HIGH && leituraAtual[5] == LOW);    
+        (leituraAtual[0] == HIGH && leituraAtual[1] == HIGH &&
+         leituraAtual[2] == HIGH && leituraAtual[3] == LOW &&
+         leituraAtual[4] == HIGH && leituraAtual[5] == LOW);
 
     // ATIVAÇÃO DO MODO NÚMERO (botão físico ou prefixo Braille)
     if (digitalRead(pino_numero) == LOW || combinacaoNumeroPressionada) {
@@ -224,8 +222,8 @@ void loop() {
 
     // 4. Gerenciamento do buffer
     if (algumPressionado && !bufferAtivo) {
-        bufferAtivo   = true;
-        tempoInicio   = millis();
+        bufferAtivo = true;
+        tempoInicio = millis();
         limparBuffer();
     }
 
@@ -245,7 +243,7 @@ void loop() {
         unsigned long tempoLimite;
         if (modoNumero) {
             tempoLimite = TEMPO_ESPERA_NUMERO;
-        } else if (modoMaiusculoFixo || preModoMaiusculo || modoShift) { // CORRIGIDO AQUI
+        } else if (modoMaiusculo || preModoMaiusculo || modoMaiusculoFixo || modoShift) {
             // Usa o tempo maior se estiver em qualquer modo especial
             tempoLimite = TEMPO_ESPERA_MAIUSCULO;
         } else {
@@ -271,8 +269,8 @@ void loop() {
             if (preModoMaiusculo) {
                 preModoMaiusculo = false;
             }
-            
-            //  DESATIVA O MODO SHIFT APÓS UMA COMBINAÇÃO SER PROCESSADA
+
+            // DESATIVA O MODO SHIFT APÓS UMA COMBINAÇÃO SER PROCESSADA
             if (modoShift) {
                 modoShift = false;
             }
@@ -298,22 +296,22 @@ void ativarModoShift() {
 }
 
 void ativarModoNumero() {
-    modoNumero   = !modoNumero;
-    bufferAtivo  = false;
+    modoNumero = !modoNumero;
+    bufferAtivo = false;
     limparBuffer();
     myDFPlayer.playFolder(4, 2);
 }
 
 void ativarModoMaiusculo() {
     if (preModoMaiusculo) {
-        modoMaiusculoFixo = true; 
+        modoMaiusculoFixo = true;
         preModoMaiusculo = false;
     } else if (modoMaiusculoFixo) {
         modoMaiusculoFixo = false;
     } else {
         preModoMaiusculo = true;
     }
-    bufferAtivo  = false;
+    bufferAtivo = false;
     limparBuffer();
     myDFPlayer.playFolder(4, 1);
 }
@@ -328,19 +326,19 @@ void aguardarSoltarBotoes() {
     for (int i = 0; i < 6; i++) {
         while (digitalRead(PINOS_BRAILLE[i]) == LOW) {
             delay(10);
-            i = -1; 
+            i = -1;
         }
     }
     // Aguarda soltar o botão Shift Latch se ele estiver pressionado
     while (digitalRead(pino_shift_latch) == LOW) {
         delay(10);
     }
-    
+
     // Aguarda soltar o botão Número se ele estiver pressionado
     while (digitalRead(pino_numero) == LOW) {
         delay(10);
     }
-    
+
     delay(DEBOUNCE_DELAY);
 }
 
@@ -358,8 +356,8 @@ void processarBuffer() {
         processarBufferNumero(b1, b2, b3, b4, b5, b6);
         return;
     }
-    
-    //  2) Modo SHIFT (Ativado se modoShift for true)
+
+    // 2) Modo SHIFT (Ativado se modoShift for true)
     if (modoShift) {
         processarBufferShift(b1, b2, b3, b4, b5, b6);
         return;
@@ -376,7 +374,9 @@ void processarBuffer() {
     // 4) Modo normal – letras minúsculas e sinais
     char letra = '\0';
     int audio = 0;
-    
+    // Mapeamento de letras minúsculas e sinais (mantido)
+
+    // ... (restante da lógica de minúsculas e símbolos, omitida para brevidade)
     // A = 100000
     if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra = 'a'; audio = 1; }
     // B = 110000
@@ -388,7 +388,7 @@ void processarBuffer() {
     // E = 100010
     else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { letra = 'e'; audio = 5; }
     // F = 110100
-    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'f'; audio  = 6; }
+    else if (b1 && b2 && !b3 && b4 && !b5 && !b6) { letra = 'f'; audio = 6; }
     // G = 110110
     else if (b1 && b2 && !b3 && b4 && b5 && !b6) { letra = 'g'; audio = 7; }
     // H = 110010
@@ -435,6 +435,7 @@ void processarBuffer() {
     else if (!b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra = ','; audio = 28; }
     // + = 011010
     else if (!b1 && b2 && b3 && !b4 && b5 && !b6) { letra = '+'; audio = 29; }
+    // ...
     // Desconhecido
     else {
         letra = '?';
@@ -443,13 +444,14 @@ void processarBuffer() {
     if (letra != '\0') {
         Keyboard.write(letra);
         if (audio > 0) {
-          myDFPlayer.playFolder(1, audio);
+            myDFPlayer.playFolder(1, audio);
         }
     }
 }
 
 // ===== PROCESSAMENTO DE NÚMEROS =====
 void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
+    // Código inalterado, mapeia A->1, B->2, etc.
     char digito = '\0';
     int audio = 0;
     // 1 (A) = 100000
@@ -479,17 +481,18 @@ void processarBufferNumero(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6)
     if (digito != '\0') {
         Keyboard.write(digito);
         if (audio > 0) {
-          myDFPlayer.playFolder(2, audio);
+            myDFPlayer.playFolder(2, audio);
         }
     }
 }
 
 // ===== PROCESSAMENTO MAIÚSCULO (Caps Lock) =====
 void processarBufferMaiusculo(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
-    char letra_maiuscula = '\0'; 
+    // Código inalterado, mapeia A->A, B->B, etc.
+    char letra_maiuscula = '\0';
     int audio = 0;
-     // A = 100000
-    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'A'; audio = 1;} 
+    // A = 100000
+    if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'A'; audio = 1;}
     // B = 110000
     else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { letra_maiuscula = 'B'; audio = 2;}
     // C = 100100
@@ -544,10 +547,10 @@ void processarBufferMaiusculo(bool b1, bool b2, bool b3, bool b4, bool b5, bool 
     if (letra_maiuscula != '\0') {
         Keyboard.write(letra_maiuscula);
         if (audio > 0) {
-          myDFPlayer.playFolder(1, audio);
+            myDFPlayer.playFolder(1, audio);
         }
     } else {
-        processarBuffer(); 
+        processarBuffer();
         return;
     }
 }
@@ -556,31 +559,41 @@ void processarBufferMaiusculo(bool b1, bool b2, bool b3, bool b4, bool b5, bool 
 void processarBufferShift(bool b1, bool b2, bool b3, bool b4, bool b5, bool b6) {
     char caractere_base = '\0';
     int audio = 0;
-    bool usarShift = true; 
+    bool usarShift = true;
 
     // ! (Shift + 1)
     if (b1 && !b2 && !b3 && !b4 && !b5 && !b6) { caractere_base = '1'; audio = 1; }
+    
     // @ (Shift + 2)
     else if (b1 && b2 && !b3 && !b4 && !b5 && !b6) { caractere_base = '2'; audio = 2; }
+    
     // # (Shift + 3)
     else if (b1 && !b2 && !b3 && b4 && !b5 && !b6) { caractere_base = '3'; audio = 3; }
+    
     // $ (Shift + 4)
     else if (b1 && !b2 && !b3 && b4 && b5 && !b6) { caractere_base = '4'; audio = 4; }
+    
     // % (Shift + 5)
-    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { caractere_base = '5'; audio = 5; } 
+    else if (b1 && !b2 && !b3 && !b4 && b5 && !b6) { caractere_base = '5'; audio = 5; }
+
     // * (Shift + 8)
     else if (b1 && b2 && !b3 && !b4 && b5 && !b6) { caractere_base = '8'; audio = 6; }
+    
     // : (Dois Pontos) -> Mudado para ';' para garantir o ":" no terminal
     else if (b1 && !b2 && b3 && !b4 && !b5 && !b6) { caractere_base = ';' ; audio = 7; }
+
     // + (Shift + =)
     else if (b1 && b2 && !b3 && b4 && b5 && !b6) { caractere_base = '='; audio = 8; }
+
     // . (Ponto Final) -> Braille Ponto 3
-    else if (!b1 && !b2 && b3 && !b4 && !b5 && !b6) { 
-        caractere_base = '.'; 
-        audio = 9; 
-        usarShift = false; 
-    } else {
-        caractere_base = '\0'; 
+    else if (!b1 && !b2 && b3 && !b4 && !b5 && !b6) {
+        caractere_base = '.';
+        audio = 9;
+        usarShift = false;
+    }
+
+    else {
+        caractere_base = '\0';
     }
 
     if (caractere_base != '\0') {
